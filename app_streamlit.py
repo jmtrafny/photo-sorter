@@ -55,7 +55,7 @@ _WS_CLIENTS: set[WebSocketServerProtocol] = set()
 _WS_LOCK = threading.Lock()
 _SEEN_A_CLIENT = False
 _AUTO_SHUTDOWN_ENABLED = True
-_GRACE_SECONDS = 6.0
+_GRACE_SECONDS = 60.0
 
 
 def _terminate_children():
