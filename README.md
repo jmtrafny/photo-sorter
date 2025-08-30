@@ -171,10 +171,15 @@ Tips:
 
 ## Safety workflow
 
-1. Run with `--dry-run` on a small sample.
-2. Run with `--copy` on the full set.
-3. Inspect results; tweak `--margin`/`--decision`/`labels.json`.
-4. Re‑run **without** `--copy` to actually move files.
+1. **Preview a sample** — Run a small **dry‑run** (or use the UI “Preview”) to see where files would go.
+2. **Tweak the knobs** — Adjust `--decision` and `--margin`/`--ratio`, and/or edit `labels.json`.
+3. **Repeat 1–2** until the sample looks right (top‑1 categories make sense and `_unsorted` rate is acceptable).
+4. **Full pass (choose one)**
+
+   * **Move originals**: run **without** `--copy`. Files are moved out of your unsorted folder.
+   * **Keep originals**: run **with** `--copy`. Originals stay put; sorted copies are written to `--dst`.
+
+> Tip: If you do a full pass with `--copy` and later decide to run a **move**, point `--dst` to an empty folder **or** use safeguards (e.g., `--skip-existing` / `--no-overwrite`) to avoid clobbering the previous copies.
 
 - - -
 
