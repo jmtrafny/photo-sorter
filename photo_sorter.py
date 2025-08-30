@@ -154,6 +154,20 @@ def safe_move(src: Path, dst: Path, dry_run: bool):
     shutil.move(str(src), str(candidate))
 
 
+
+
+def safe_copy(src: Path, dst: Path, dry_run: bool):
+    """Copy with collision-safe naming (appends __1, __2, ... if needed)."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dry_run:
+        return
+    base, ext = dst.stem, dst.suffix
+    candidate = dst
+    i = 1
+    while candidate.exists():
+        candidate = dst.with_name(f"{base}__{i}{ext}")
+        i += 1
+    shutil.copy2(str(src), str(candidate))
 def is_image_file(p: Path) -> bool:
     return p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".gif"}
 
@@ -296,14 +310,14 @@ def main():
                     print(f"[COPY] {f} -> {target}")
                 else:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(f), str(target))
+                    safe_copy(f, target, dry_run=False)
             else:
                 if args.copy:
                     if args.dry_run:
                         print(f"[COPY] {f} -> {target}")
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(f), str(target))
+                        safe_copy(f, target, dry_run=False)
                 else:
                     if args.dry_run:
                         print(f"[MOVE] {f} -> {target}")
