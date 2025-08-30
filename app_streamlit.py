@@ -388,27 +388,29 @@ if "labels_str" not in st.session_state:
 with st.sidebar:
     st.header("Settings")
 
-    # Source selector
-    c1, c2 = st.columns([0.75, 0.25])
-    with c1:
-        st.session_state.src_str = st.text_input("Source folder (--src)", value=st.session_state.src_str)
-    with c2:
-        if st.button("Browse…", key="browse_src"):
+    # Source selector with integrated file chooser
+    st.markdown("**Source folder (--src)**")
+    src_placeholder = st.empty()
+    with src_placeholder.container():
+        if st.button(f"📁 {st.session_state.src_str}", key="src_chooser", use_container_width=True, 
+                     help="Click to browse for source folder"):
             picked = pick_directory(st.session_state.src_str)
             if picked:
                 st.session_state.src_str = picked
+                st.rerun()
 
-    # Destination selector
-    c3, c4 = st.columns([0.75, 0.25])
-    with c3:
-        st.session_state.dst_str = st.text_input("Destination (--dst)", value=st.session_state.dst_str)
-    with c4:
-        if st.button("Browse…", key="browse_dst"):
+    # Destination selector with integrated file chooser  
+    st.markdown("**Destination (--dst)**")
+    dst_placeholder = st.empty()
+    with dst_placeholder.container():
+        if st.button(f"📁 {st.session_state.dst_str}", key="dst_chooser", use_container_width=True,
+                     help="Click to browse for destination folder"):
             picked = pick_directory(st.session_state.dst_str)
             if picked:
                 st.session_state.dst_str = picked
+                st.rerun()
 
-    # Labels file (keep as text for now; could add a file picker later)
+    # Labels file - keep as text input for now since it's a file path not a folder
     st.session_state.labels_str = st.text_input("Labels file (--labels)", value=st.session_state.labels_str)
 
     st.subheader("Routing")
