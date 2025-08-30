@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 r"""
-photo_sorter.py
+photo_sorter.py — For auto-sorting photos into category folders.
+
+Core features (all local, no paid APIs):
+- Zero-shot tagging via OpenCLIP (ViT-B/32) against an editable label list (labels.json).
+- Date-based subfolders using EXIF (Year/Month).
+- Optional perceptual duplicate detection via average-hash.
+- Dry-run mode to preview actions.
+- Cross-platform (Windows/macOS/Linux).
 
 Usage:
-  python photo_sorter.py --src "C:\Photos\Unsorted" --dst "C:\Photos\Sorted" --dry-run
+  python photo_sorter.py --src "C:\\Photos\\Unsorted" --dst "C:\\Photos\\Sorted" --dry-run
   python photo_sorter.py --src /path/in --dst /path/out --threshold 0.23 --dedupe
+
+Tip: Edit labels.json to add/remove categories and synonyms.
 """
 
 import argparse
@@ -154,6 +163,23 @@ def safe_move(src: Path, dst: Path, dry_run: bool):
     shutil.move(str(src), str(candidate))
 
 
+def safe_copy(src: Path, dst: Path, *, unique: bool, dry_run: bool):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dry_run:
+        return
+    if unique:
+        base, ext = dst.stem, dst.suffix
+        candidate = dst
+        i = 1
+        while candidate.exists():
+            candidate = dst.with_name(f"{base}__{i}{ext}")
+            i += 1
+        shutil.copy2(str(src), str(candidate))
+    else:
+        # default copy: overwrite if exists
+        shutil.copy2(str(src), str(dst))
+
+
 def is_image_file(p: Path) -> bool:
     return p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".gif"}
 
@@ -178,8 +204,11 @@ def main():
     ap.add_argument("--threshold", type=float, default=0.10, help="Confidence threshold when --decision=threshold (scores are normalized across labels)")
     ap.add_argument("--topk", type=int, default=1, help="Move into the highest scoring label (1) or copy into top-K labels (>1).")
     ap.add_argument("--copy", action="store_true", help="Copy instead of move")
-    ap.add_argument("--dedupe", action="store_true", help="Detect and divert near-duplicates to a 'duplicates' folder (perceptual hash)")
-    ap.add_argument("--dry-run", action="store_true", help="Show what would happen without moving files")
+    ap.add_argument("--no-overwrite", action="store_true", help="When copying, never overwrite; create unique names like file__1.jpg")
+    ap.add_argument("--skip-existing", action="store_true", help="If destination exists, skip instead of writing")
+    ap.add_argument("--dedupe", action="store_true", help="Detect and divert near-duplicates to a 'duplicates' folder (perceptual hash within this run)")
+    ap.add_argument("--scan-dst-dedupe", action="store_true", help="Pre-scan --dst and skip any source image whose hash already exists in destination")
+    ap.add_argument("--dry-run", action="store_true", help="Show what would happen without changing files")
     ap.add_argument("--agg", choices=["max", "mean", "sum"], default="max", help="How to aggregate synonym scores per label (default: max)")
     ap.add_argument("--decision", choices=["threshold", "margin", "ratio", "always-top1"], default="margin", help="Routing rule: threshold/ratio/margin/always-top1")
     ap.add_argument("--margin", type=float, default=0.008, help="top1 - top2 must be >= margin when --decision=margin")
@@ -209,8 +238,20 @@ def main():
 
     text_features, owners, prompts = build_text_tokens(model, tokenizer, labels_cfg, device, args.rich_prompts, args.ignore_weights)
 
+    # Dedupe state
     seen_hashes = set()
+    dest_hashes = set()
     duplicate_dir = dst / "_duplicates"
+
+    # Optional: pre-scan destination for dedupe across runs
+    if args.scan_dst_dedupe:
+        print("[SCAN] Building destination hash index…")
+        dst_imgs = [p for p in dst.rglob("*") if p.is_file() and is_image_file(p)]
+        for p in tqdm(dst_imgs, desc="hash(dst)"):
+            ah = compute_phash(p)
+            if ah is not None:
+                dest_hashes.add(ah)
+        print(f"[SCAN] Indexed {len(dest_hashes)} unique image hashes from destination.")
 
     files = [p for p in src.rglob("*") if p.is_file() and is_image_file(p)]
     if not files:
@@ -222,10 +263,13 @@ def main():
     print(f"Processing {len(files)} files... ({action}, topk={args.topk}, threshold={args.threshold}, dry_run={args.dry_run})")
 
     for f in tqdm(files):
-        # Dedupe first
-        if args.dedupe:
-            ah = compute_phash(f)
-            if ah is not None:
+        # Dedupe first (within-run and optionally against destination)
+        ah = compute_phash(f) if (args.dedupe or args.scan_dst_dedupe) else None
+        if ah is not None:
+            if args.scan_dst_dedupe and ah in dest_hashes:
+                print(f"[SKIP DUP_DST] {f}")
+                continue
+            if args.dedupe:
                 if ah in seen_hashes:
                     target = duplicate_dir / f.name
                     if args.dry_run:
@@ -291,24 +335,24 @@ def main():
         for label in chosen:
             out_dir = dst / label / ydir
             target = out_dir / f.name
-            if args.copy and len(chosen) > 1:
-                if args.dry_run:
-                    print(f"[COPY] {f} -> {target}")
+
+            if args.copy:
+                if args.skip_existing and target.exists():
+                    print(f"[SKIP EXISTING] {f} -> {target}")
                 else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(f), str(target))
-            else:
-                if args.copy:
                     if args.dry_run:
                         print(f"[COPY] {f} -> {target}")
                     else:
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(f), str(target))
+                        safe_copy(f, target, unique=args.no_overwrite, dry_run=False)
+            else:
+                if args.skip_existing and target.exists():
+                    print(f"[SKIP EXISTING] {f} -> {target}")
                 else:
                     if args.dry_run:
                         print(f"[MOVE] {f} -> {target}")
                     else:
                         safe_move(f, target, dry_run=False)
+                # After move, stop (don't duplicate across multiple labels)
                 break
 
 
