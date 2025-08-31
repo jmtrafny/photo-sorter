@@ -497,9 +497,20 @@ def main():
     pretrained = "openai"    # Use OpenAI's original CLIP weights
     
     print(f"Loading CLIP model on device: {device}")
-    model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained)
-    tokenizer = open_clip.get_tokenizer(model_name)
-    model = model.to(device).eval()  # Set to evaluation mode
+    print("This may take a moment on first run (downloading ~150MB model)...")
+    
+    try:
+        model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained)
+        tokenizer = open_clip.get_tokenizer(model_name)
+        model = model.to(device).eval()  # Set to evaluation mode
+        print("✅ Model loaded successfully")
+    except Exception as e:
+        print(f"❌ Failed to load CLIP model: {e}")
+        print("This could be due to:")
+        print("  - Internet connection required for first-time model download")
+        print("  - Insufficient memory (need ~4GB RAM minimum)")
+        print("  - CUDA/GPU driver issues (try CPU mode)")
+        return
 
     # Pre-encode all text prompts for efficient comparison
     # This is done once upfront rather than per-image
@@ -520,6 +531,15 @@ def main():
     action = "COPY" if args.copy else "MOVE"
     print(f"Device: {device} | Label count: {len(labels_cfg)} | Prompts: {len(prompts)} | Agg: {args.agg}")
     print(f"Processing {len(files)} files... ({action}, topk={args.topk}, threshold={args.threshold}, dry_run={args.dry_run})")
+    
+    if len(files) == 0:
+        print("No supported image files found. Supported formats: .jpg, .jpeg, .png, .webp, .bmp, .tiff, .gif")
+        print(f"Searched in: {src}")
+        return
+        
+    if len(files) > 10000:
+        print(f"⚠️  Large collection detected ({len(files)} files). Consider processing in smaller batches.")
+        print("   This may take significant time and memory. Press Ctrl+C to cancel if needed.")
 
     # Process each image file
     for f in tqdm(files, desc="Processing images"):
