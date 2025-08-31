@@ -47,30 +47,38 @@ except Exception as e:  # pragma: no cover
         "websockets is required. Please add `websockets>=12.0` to requirements.txt"
     ) from e
 
+# Global constants and state management
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".gif"}
-CHILD_PROCS: List[subprocess.Popen] = []
+CHILD_PROCS: List[subprocess.Popen] = []  # Track subprocess for cleanup
 
-_WS_PORT: int = 0
+# WebSocket server state for browser connection monitoring
+# This enables automatic shutdown when user closes browser tab
+_WS_PORT: int = 0  # Dynamic port assignment
 _WS_SERVER = None
 _WS_LOOP: asyncio.AbstractEventLoop | None = None
-_WS_CLIENTS: set[WebSocketServerProtocol] = set()
-_WS_LOCK = threading.Lock()
-_SEEN_A_CLIENT = False
-_AUTO_SHUTDOWN_ENABLED = True
-_GRACE_SECONDS = 60.0
+_WS_CLIENTS: set[WebSocketServerProtocol] = set()  # Connected browser tabs
+_WS_LOCK = threading.Lock()  # Thread safety for client set
+_SEEN_A_CLIENT = False  # Whether any browser ever connected
+_AUTO_SHUTDOWN_ENABLED = True  # Enable auto-shutdown feature
+_GRACE_SECONDS = 60.0  # How long to wait after last client disconnects
 
 
 def _terminate_children():
+    """Clean up any running subprocess when Streamlit shuts down.
+    
+    This ensures photo processing doesn't continue running in background
+    after the web UI is closed.
+    """
     for p in list(CHILD_PROCS):
         try:
-            if p.poll() is None:
-                p.terminate()
+            if p.poll() is None:  # Process still running
+                p.terminate()  # Send SIGTERM
                 try:
-                    p.wait(timeout=2)
+                    p.wait(timeout=2)  # Give it 2 seconds to clean up
                 except Exception:
-                    p.kill()
+                    p.kill()  # Force kill if it doesn't respond
         except Exception:
-            pass
+            pass  # Ignore errors during cleanup
     CHILD_PROCS.clear()
 
 
@@ -127,8 +135,13 @@ async def _ws_main(port: int):
 
 
 def _find_free_port() -> int:
+    """Find an available port for the WebSocket server.
+    
+    Returns:
+        Port number that's currently available
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("0.0.0.0", 0))  # find a port usable from localhost or LAN IP
+        s.bind(("0.0.0.0", 0))  # Let OS assign an available port
         return s.getsockname()[1]
 
 
@@ -222,19 +235,27 @@ def _inject_ws_client(port: int):
 # ----------------------------
 
 def pick_directory(initial: str | Path | None = None) -> str | None:
-    """Open a native folder chooser and return the selected path or None.
-    Falls back gracefully if Tkinter is unavailable (e.g., headless env).
+    """Open a native OS folder picker dialog.
+    
+    Provides native folder selection experience that's more user-friendly
+    than typing paths. Falls back gracefully if GUI is unavailable.
+    
+    Args:
+        initial: Starting directory for the picker dialog
+        
+    Returns:
+        Selected directory path as string, or None if cancelled/failed
     """
     try:
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
-        # keep the dialog on top of other windows
+        # Keep dialog on top so it doesn't get lost behind browser
         try:
-            root.attributes('-topmost', True)
+            root.attributes('-topmost', True)  # Platform-specific
         except Exception:
-            pass
+            pass  # Not all platforms support this
         initialdir = str(initial) if initial else None
         path = filedialog.askdirectory(initialdir=initialdir, title="Select folder")
         try:
@@ -243,7 +264,8 @@ def pick_directory(initial: str | Path | None = None) -> str | None:
             pass
         return path or None
     except Exception as e:
-        # If something goes wrong, just return None (user can type path)
+        # Graceful fallback - user can still type paths manually
+        # Common in headless environments or restricted systems
         return None
 
 
@@ -426,8 +448,8 @@ def get_exif_year_month(path: Path) -> Tuple[int, int]:
 
 
 # --- Page ---
-st.set_page_config(page_title="Photo Organizer — Preview & Run", layout="wide")
-st.title("📷 Photo Organizer — Preview & Full Run")
+st.set_page_config(page_title="Photo Organizer", layout="wide")
+st.title("📷 Photo Organizer — Let AI organize your pictures for you!")
 
 _WS_PORT = _start_ws_server()
 _start_ws_watcher()
@@ -649,16 +671,32 @@ def build_cli_command():
 
 
 def run_cli(exe: List[str]):
+    """Execute the photo sorting CLI with real-time output display.
+    
+    Runs photo_sorter.py as subprocess and streams output to Streamlit UI.
+    Provides real-time progress updates and handles process lifecycle.
+    
+    Args:
+        exe: Command line arguments from build_cli_command()
+    """
     st.write("Running:")
+    # Show the actual command being executed (with proper quoting)
     st.code(" ".join([f'\"{x}\"' if " " in x else x for x in exe]), language="bash")
+    
     with st.status("Executing full run…", expanded=True) as status:
+        # Start subprocess with real-time output capture
         proc = subprocess.Popen(exe, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        CHILD_PROCS.append(proc)
+        CHILD_PROCS.append(proc)  # Track for cleanup
+        
+        # Stream output line by line
         for line in proc.stdout:  # type: ignore
             st.write(line.rstrip())
+        
+        # Wait for completion and handle result
         code = proc.wait()
         if proc in CHILD_PROCS:
-            CHILD_PROCS.remove(proc)
+            CHILD_PROCS.remove(proc)  # Clean up tracking
+            
         if code == 0:
             status.update(label="Done", state="complete")
             st.success("Full run completed successfully.")
