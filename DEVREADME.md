@@ -34,14 +34,18 @@ Photo Organizer is an AI-powered tool for automatically sorting photos using zer
 ### File Structure
 
 ```
-
-├── photo_sorter.py      # CLI implementation
-├── app_streamlit.py     # Web UI implementation
+photo-organizer/
+├── photo_sorter.py      # CLI implementation (for developers)
+├── app_streamlit.py     # Web UI core application
+├── launch_ui.py        # EXE entry point
 ├── default_labels.py    # Built-in label configurations
+├── build_exe.py        # Single EXE build script
+├── create_release.py    # Distribution package creator
 ├── undo.py             # Undo functionality
+├── requirements.txt     # Python dependencies
 ├── README.md           # User documentation
 ├── DEVREADME.md        # This file
-└── labels.json         # Example custom labels (optional)
+└── labels.json         # Example custom labels
 ```
 
 ## Core Technologies
@@ -311,53 +315,35 @@ pip install pyinstaller
 pip install -r requirements.txt
 ```
 
-#### Option 1: Automated Build (Recommended)
+#### Simple Build Process
 ```bash
-# Run the build script
+# Build single user-friendly executable
 python build_exe.py
-
-# Choose option:
-# 1 = CLI only
-# 2 = UI only  
-# 3 = Both (recommended)
 ```
 
-#### Option 2: Manual PyInstaller Commands
+#### Manual PyInstaller Command (if needed)
 ```bash
-# For CLI executable
-pyinstaller --name=PhotoOrganizer-CLI --onefile --console --add-data=default_labels.py;. --hidden-import=open_clip --hidden-import=torch --hidden-import=PIL --hidden-import=imagehash --collect-all=open_clip --collect-all=torch photo_sorter.py
-
-# For UI executable  
-pyinstaller --name=PhotoOrganizer-UI --onefile --windowed --add-data=default_labels.py;. --add-data=app_streamlit.py;. --hidden-import=streamlit --hidden-import=open_clip --hidden-import=torch --hidden-import=PIL --hidden-import=websockets --collect-all=streamlit --collect-all=open_clip --collect-all=torch launch_ui.py
+pyinstaller --name=PhotoOrganizer --onefile --windowed --add-data=default_labels.py;. --add-data=app_streamlit.py;. --hidden-import=streamlit --hidden-import=open_clip --hidden-import=torch --hidden-import=PIL --hidden-import=websockets --collect-all=streamlit --collect-all=open_clip --collect-all=torch launch_ui.py
 ```
 
 ### Output Structure
 After building, you'll have:
 ```
 dist/
-├── PhotoOrganizer-CLI.exe    # Command line version (~500MB)
-├── PhotoOrganizer-UI.exe     # Web interface version (~500MB)
+├── PhotoOrganizer.exe        # Single double-click application (~500MB)
 └── [build artifacts]
 ```
 
 ### Creating Distribution Package for GitHub
 ```bash
-# 1. Create distribution folder
+# Automated (recommended)
+python create_release.py
+
+# Manual
 mkdir PhotoOrganizer-Release
-
-# 2. Copy executables
-copy dist\PhotoOrganizer-CLI.exe PhotoOrganizer-Release\
-copy dist\PhotoOrganizer-UI.exe PhotoOrganizer-Release\
-
-# 3. Copy documentation
+copy dist\PhotoOrganizer.exe PhotoOrganizer-Release\
 copy README.md PhotoOrganizer-Release\
 copy labels.json PhotoOrganizer-Release\example-labels.json
-
-# 4. Create usage guide
-echo "Quick Start:" > PhotoOrganizer-Release\USAGE.txt
-echo "1. Double-click PhotoOrganizer-UI.exe for web interface" >> PhotoOrganizer-Release\USAGE.txt
-echo "2. Or use PhotoOrganizer-CLI.exe for command line" >> PhotoOrganizer-Release\USAGE.txt
-echo "3. First run downloads model (~150MB) - requires internet" >> PhotoOrganizer-Release\USAGE.txt
 ```
 
 ### Key Considerations

@@ -28,14 +28,14 @@ def main():
         print("[ERROR] PyInstaller not found. Install with: pip install pyinstaller")
         return
     
-    # Step 2: Build executables
-    print("Building executables...")
+    # Step 2: Build executable
+    print("Building PhotoOrganizer.exe...")
     try:
-        result = subprocess.run([sys.executable, "build_exe.py"], input="3\n", text=True, capture_output=True)
+        result = subprocess.run([sys.executable, "build_exe.py"], text=True, capture_output=True)
         if result.returncode != 0:
             print(f"[ERROR] Build failed: {result.stderr}")
             return
-        print("[OK] Executables built successfully")
+        print("[OK] PhotoOrganizer.exe built successfully")
     except Exception as e:
         print(f"[ERROR] Build failed: {e}")
         return
@@ -79,10 +79,10 @@ def main():
     # Step 6: Create usage guide
     usage_content = """Photo Organizer - AI-Powered Photo Organization
 
-QUICK START:
-1. Double-click PhotoOrganizer-UI.exe for web interface (recommended)
-2. Or use PhotoOrganizer-CLI.exe for command line usage
-3. First run downloads AI model (~150MB) - requires internet connection
+GETTING STARTED:
+1. Double-click PhotoOrganizer.exe
+2. Browser opens automatically with user-friendly interface  
+3. First run downloads AI model (~150MB) - requires internet
 
 SYSTEM REQUIREMENTS:
 - Windows 10 or later
@@ -90,24 +90,18 @@ SYSTEM REQUIREMENTS:
 - 2GB free disk space
 - Internet connection (first run only)
 
-WEB INTERFACE:
-- Double-click PhotoOrganizer-UI.exe
-- Browser will open automatically
-- Use folder browsers to select source and destination
-- Preview classifications before running
-- App auto-closes when browser is closed
+HOW TO USE:
+1. Click folder icons to select source photos and destination
+2. Preview a sample to see how photos will be organized
+3. Click "Run FULL (COPY)" to safely organize photos
+4. App closes automatically when you close the browser
 
-COMMAND LINE:
-- Open Command Prompt in this folder
-- Run: PhotoOrganizer-CLI.exe --help
-- Example: PhotoOrganizer-CLI.exe --src "C:\\Photos\\Unsorted" --dst "C:\\Photos\\Sorted" --dry-run
+CUSTOM CATEGORIES:
+- Advanced users can edit example-labels.json
+- Restart app to use custom categories
 
-CUSTOM LABELS:
-- Copy example-labels.json to labels.json
-- Edit categories, synonyms, and weights as needed
-- Use in web interface or with --labels flag in CLI
-
-For full documentation, see README.md
+That's it! No technical knowledge needed.
+For developers: see README.md for source code details.
 """
     
     with open(release_dir / "USAGE.txt", "w", encoding="utf-8") as f:
