@@ -291,25 +291,81 @@ Scores are normalized across all labels to sum to 1.0, making thresholds compara
 
 ### EXE Creation
 
-The application is designed to be packaged into a standalone executable:
+The application is designed to be packaged into standalone executables for easy distribution.
 
 **Benefits of current design**:
 
 * Built-in labels eliminate external file dependencies
 * Graceful fallback for missing dependencies
 * Clear error messages for troubleshooting
+* Unicode-safe for Windows console
 
-**Recommended tools**:
+### Step-by-Step Packaging Process
 
-* **PyInstaller**: Most popular, good CLIP support
-* **cx\_Freeze**: Cross-platform alternative
-* **Nuitka**: Performance-oriented compilation
+#### Prerequisites
+```bash
+# Install PyInstaller
+pip install pyinstaller
 
-**Considerations**:
+# Ensure all dependencies are installed
+pip install -r requirements.txt
+```
 
-* Large executable size due to PyTorch/CLIP
-* GPU support requires CUDA libraries
-* Model weights are embedded in executable
+#### Option 1: Automated Build (Recommended)
+```bash
+# Run the build script
+python build_exe.py
+
+# Choose option:
+# 1 = CLI only
+# 2 = UI only  
+# 3 = Both (recommended)
+```
+
+#### Option 2: Manual PyInstaller Commands
+```bash
+# For CLI executable
+pyinstaller --name=PhotoOrganizer-CLI --onefile --console --add-data=default_labels.py;. --hidden-import=open_clip --hidden-import=torch --hidden-import=PIL --hidden-import=imagehash --collect-all=open_clip --collect-all=torch photo_sorter.py
+
+# For UI executable  
+pyinstaller --name=PhotoOrganizer-UI --onefile --windowed --add-data=default_labels.py;. --add-data=app_streamlit.py;. --hidden-import=streamlit --hidden-import=open_clip --hidden-import=torch --hidden-import=PIL --hidden-import=websockets --collect-all=streamlit --collect-all=open_clip --collect-all=torch launch_ui.py
+```
+
+### Output Structure
+After building, you'll have:
+```
+dist/
+├── PhotoOrganizer-CLI.exe    # Command line version (~500MB)
+├── PhotoOrganizer-UI.exe     # Web interface version (~500MB)
+└── [build artifacts]
+```
+
+### Creating Distribution Package for GitHub
+```bash
+# 1. Create distribution folder
+mkdir PhotoOrganizer-Release
+
+# 2. Copy executables
+copy dist\PhotoOrganizer-CLI.exe PhotoOrganizer-Release\
+copy dist\PhotoOrganizer-UI.exe PhotoOrganizer-Release\
+
+# 3. Copy documentation
+copy README.md PhotoOrganizer-Release\
+copy labels.json PhotoOrganizer-Release\example-labels.json
+
+# 4. Create usage guide
+echo "Quick Start:" > PhotoOrganizer-Release\USAGE.txt
+echo "1. Double-click PhotoOrganizer-UI.exe for web interface" >> PhotoOrganizer-Release\USAGE.txt
+echo "2. Or use PhotoOrganizer-CLI.exe for command line" >> PhotoOrganizer-Release\USAGE.txt
+echo "3. First run downloads model (~150MB) - requires internet" >> PhotoOrganizer-Release\USAGE.txt
+```
+
+### Key Considerations
+* **Size**: ~500MB per executable due to PyTorch/CLIP
+* **First Run**: Requires internet for model download (~150MB)  
+* **Memory**: 4GB+ RAM recommended for large collections
+* **GPU**: CUDA support adds significant size if included
+* **Compatibility**: Windows 10+ (can build for other platforms)
 
 ### Dependencies
 
