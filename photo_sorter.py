@@ -179,8 +179,8 @@ def _prompt_variants(syn: str, rich: bool) -> Iterable[str]:
         "a photo of {}",           # Most effective general template
         "a picture of {}",         # Alternative to "image" - more natural language
         "a close-up of {}",        # Shorter, more natural than "close-up photo"
-        "{} in a photo",          # Different grammatical structure
-        "this is {}",             # Natural identification phrase
+        "{} in a photo",           # Different grammatical structure
+        "this is {}",              # Natural identification phrase
     ]
     for t in templates:
         yield t.format(syn)
