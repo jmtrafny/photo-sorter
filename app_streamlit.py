@@ -340,14 +340,17 @@ def load_labels(labels_path: Path | None = None, use_builtin: bool = True) -> Tu
 
 
 def _prompt_variants(syn: str, rich: bool) -> List[str]:
+    """Generate prompt variations for a synonym to improve CLIP's understanding."""
     if not rich:
         return [f"a photo of {syn}"]
+    # Keep templates in sync with photo_sorter.py
     return [
-        f"{syn}",
-        f"a photo of {syn}",
-        f"an image of {syn}",
-        f"a close-up photo of {syn}",
-        f"a snapshot of {syn}",
+        f"{syn}",                    # Direct keyword (works well for objects)
+        f"a photo of {syn}",         # Most effective general template
+        f"a picture of {syn}",       # Alternative to "image" - more natural language
+        f"a close-up of {syn}",      # Shorter, more natural than "close-up photo"
+        f"{syn} in a photo",        # Different grammatical structure
+        f"this is {syn}",           # Natural identification phrase
     ]
 
 

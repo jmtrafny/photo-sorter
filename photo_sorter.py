@@ -173,13 +173,14 @@ def _prompt_variants(syn: str, rich: bool) -> Iterable[str]:
         yield f"a photo of {syn}"
         return
     # These templates help CLIP understand context without introducing too much bias
-    # Based on OpenAI's CLIP paper recommendations
+    # Based on OpenAI's CLIP paper and empirical research on prompt effectiveness
     templates = [
-        "{}",                      # Direct keyword
-        "a photo of {}",           # Most common template
-        "an image of {}",          # Alternative phrasing
-        "a close-up photo of {}",  # Suggests detailed/zoomed content  
-        "a snapshot of {}",        # Casual photo context
+        "{}",                      # Direct keyword (works well for objects)
+        "a photo of {}",           # Most effective general template
+        "a picture of {}",         # Alternative to "image" - more natural language
+        "a close-up of {}",        # Shorter, more natural than "close-up photo"
+        "{} in a photo",          # Different grammatical structure
+        "this is {}",             # Natural identification phrase
     ]
     for t in templates:
         yield t.format(syn)
