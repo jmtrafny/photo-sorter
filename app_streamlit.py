@@ -411,21 +411,36 @@ with st.sidebar:
                 st.rerun()
 
     # Labels file - keep as text input for now since it's a file path not a folder
-    st.session_state.labels_str = st.text_input("Labels file (--labels)", value=st.session_state.labels_str)
+    st.session_state.labels_str = st.text_input("Labels file (--labels)", value=st.session_state.labels_str,
+                                                 help="JSON file defining categories with prompts, synonyms, and weights")
 
     st.subheader("Routing")
-    agg = st.selectbox("Aggregation (--agg)", ["max", "mean", "sum"], index=0)
-    decision = st.selectbox("Decision (--decision)", ["margin", "ratio", "threshold", "always-top1"], index=0)
-    margin = st.slider("Margin (--margin)", 0.0, 0.03, 0.008, 0.001)
-    ratio = st.slider("Ratio (--ratio)", 1.00, 1.30, 1.06, 0.01)
-    threshold = st.slider("Threshold (--threshold)", 0.05, 0.4, 0.10, 0.01)
+    agg = st.selectbox("Aggregation (--agg)", ["max", "mean", "sum"], index=0,
+                       help="How to combine scores from multiple synonyms. 'max' prevents bias from labels with many synonyms")
+    decision = st.selectbox("Decision (--decision)", ["margin", "ratio", "threshold", "always-top1"], index=0,
+                            help="Rule for accepting a label: margin (top1-top2 gap), ratio (top1/top2), threshold (minimum score), or always-top1 (never reject)")
+    margin = st.slider("Margin (--margin)", 0.0, 0.03, 0.008, 0.001,
+                       help="Minimum difference between top two scores (used with margin decision). Higher = stricter")
+    ratio = st.slider("Ratio (--ratio)", 1.00, 1.30, 1.06, 0.01,
+                      help="Minimum ratio of top1/top2 scores (used with ratio decision). Higher = stricter")
+    threshold = st.slider("Threshold (--threshold)", 0.05, 0.4, 0.10, 0.01,
+                          help="Minimum confidence score to accept a label (used with threshold decision). Higher = stricter")
 
     st.subheader("Behavior")
-    topk = st.selectbox("Top-K (--topk)", [1, 2, 3], index=0)
-    copy = st.checkbox("Copy (not move) (--copy)", value=False)
-    dedupe = st.checkbox("Deduplicate (--dedupe)", value=False)
-    rich_prompts = st.checkbox("Rich prompts (--rich-prompts)", value=True)
-    ignore_weights = st.checkbox("Ignore weights (--ignore-weights)", value=True)
+    topk = st.selectbox("Top-K (--topk)", [1, 2, 3], index=0,
+                        help="Number of top categories to sort into. With copy mode, creates duplicates in multiple folders")
+    copy = st.checkbox("Copy (not move) (--copy)", value=False,
+                       help="Copy files instead of moving them. Originals stay in source folder")
+    dedupe = st.checkbox("Deduplicate (--dedupe)", value=False,
+                         help="Detect near-duplicates using perceptual hashing and move them to _duplicates folder")
+    rich_prompts = st.checkbox("Rich prompts (--rich-prompts)", value=True,
+                                help="Use multiple prompt templates per synonym for better accuracy (slightly slower)")
+    ignore_weights = st.checkbox("Ignore weights (--ignore-weights)", value=True,
+                                  help="Treat all labels equally (weight=1.0) to prevent category bias")
+    skip_existing = st.checkbox("Skip existing (--skip-existing)", value=False, 
+                                 help="Skip files if destination already exists (useful for incremental runs)")
+    no_overwrite = st.checkbox("No overwrite (--no-overwrite)", value=False, 
+                                help="Error if destination exists instead of auto-renaming (safety guard)")
 
     st.subheader("Preview sample")
     sample_n = st.number_input("Sample size", min_value=1, max_value=500, value=50, step=1)
@@ -535,6 +550,10 @@ def build_cli_command():
         exe.append("--rich-prompts")
     if ignore_weights:
         exe.append("--ignore-weights")
+    if skip_existing:
+        exe.append("--skip-existing")
+    if no_overwrite:
+        exe.append("--no-overwrite")
     return exe
 
 

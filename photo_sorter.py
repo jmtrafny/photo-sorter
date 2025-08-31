@@ -141,10 +141,18 @@ def get_exif_datetime(path: Path) -> Tuple[int, int]:
     return dt.year, dt.month
 
 
-def safe_move(src: Path, dst: Path, dry_run: bool):
+def safe_move(src: Path, dst: Path, dry_run: bool, skip_existing: bool = False, no_overwrite: bool = False):
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return
+    
+    if dst.exists():
+        if skip_existing:
+            print(f"[SKIP] {src} -> {dst} (destination exists)")
+            return
+        elif no_overwrite:
+            raise FileExistsError(f"Destination already exists: {dst}")
+    
     base, ext = dst.stem, dst.suffix
     candidate = dst
     i = 1
@@ -156,11 +164,19 @@ def safe_move(src: Path, dst: Path, dry_run: bool):
 
 
 
-def safe_copy(src: Path, dst: Path, dry_run: bool):
+def safe_copy(src: Path, dst: Path, dry_run: bool, skip_existing: bool = False, no_overwrite: bool = False):
     """Copy with collision-safe naming (appends __1, __2, ... if needed)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return
+    
+    if dst.exists():
+        if skip_existing:
+            print(f"[SKIP] {src} -> {dst} (destination exists)")
+            return
+        elif no_overwrite:
+            raise FileExistsError(f"Destination already exists: {dst}")
+    
     base, ext = dst.stem, dst.suffix
     candidate = dst
     i = 1
@@ -203,6 +219,8 @@ def main():
     ap.add_argument("--debug-prompts", action="store_true", help="Also print top matching prompts/synonyms (slower)")
     ap.add_argument("--rich-prompts", action="store_true", help="Use multiple prompt templates per synonym (slightly slower)")
     ap.add_argument("--ignore-weights", action="store_true", help="Ignore label weights (treat all as 1.0) to reduce bias")
+    ap.add_argument("--skip-existing", action="store_true", help="Skip files if destination already exists (useful for incremental runs)")
+    ap.add_argument("--no-overwrite", action="store_true", help="Error if destination exists instead of auto-renaming (safety guard)")
     args = ap.parse_args()
 
     src = Path(args.src).expanduser().resolve()
@@ -246,7 +264,7 @@ def main():
                         print(f"[DUP] {f} -> {target}")
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
-                        safe_move(f, target, dry_run=False)
+                        safe_move(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
                     continue
                 seen_hashes.add(ah)
 
@@ -305,24 +323,31 @@ def main():
         for label in chosen:
             out_dir = dst / label / ydir
             target = out_dir / f.name
-            if args.copy and len(chosen) > 1:
-                if args.dry_run:
-                    print(f"[COPY] {f} -> {target}")
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    safe_copy(f, target, dry_run=False)
-            else:
-                if args.copy:
+            try:
+                if args.copy and len(chosen) > 1:
                     if args.dry_run:
                         print(f"[COPY] {f} -> {target}")
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
-                        safe_copy(f, target, dry_run=False)
+                        safe_copy(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
                 else:
-                    if args.dry_run:
-                        print(f"[MOVE] {f} -> {target}")
+                    if args.copy:
+                        if args.dry_run:
+                            print(f"[COPY] {f} -> {target}")
+                        else:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            safe_copy(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
                     else:
-                        safe_move(f, target, dry_run=False)
+                        if args.dry_run:
+                            print(f"[MOVE] {f} -> {target}")
+                        else:
+                            safe_move(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
+                    break
+            except FileExistsError as e:
+                print(f"[ERROR] {e}")
+                if args.no_overwrite:
+                    print("Stopping due to --no-overwrite flag.")
+                    return
                 break
 
 

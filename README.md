@@ -123,6 +123,8 @@ Adjust confidence:
 * `--debug-scores` *(bool)*: Print top label scores per image.
 * `--debug-topk <int>` *(default: <b>**************************************************`5`**************************************************</b>)*: How many labels to print with `--debug-scores`.
 * `--debug-prompts` *(bool)*: Print top matching prompt/synonym hits (slower; use on small test sets).
+* `--skip-existing` *(bool)*: Skip files if destination already exists (useful for incremental runs).
+* `--no-overwrite` *(bool)*: Error and stop if destination exists instead of auto-renaming (safety guard).
 
 - - -
 
@@ -179,7 +181,7 @@ Tips:
    * **Move originals**: run **without** `--copy`. Files are moved out of your unsorted folder.
    * **Keep originals**: run **with** `--copy`. Originals stay put; sorted copies are written to `--dst`.
 
-> Tip: If you do a full pass with `--copy` and later decide to run a **move**, point `--dst` to an empty folder **or** use safeguards (e.g., `--skip-existing` / `--no-overwrite`) to avoid clobbering the previous copies.
+> Tip: If you do a full pass with `--copy` and later decide to run a **move**, point `--dst` to an empty folder **or** use safeguards (`--skip-existing` / `--no-overwrite`) to avoid clobbering the previous copies.
 
 - - -
 
