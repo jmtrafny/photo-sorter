@@ -16,9 +16,10 @@ def build_exe():
     PyInstaller.__main__.run([
         '--name=PhotoOrganizer',
         '--onefile', 
-        '--windowed',  # No console window for clean experience
+        # Removed --windowed to allow subprocess to work properly
         '--add-data=default_labels.py;.',
         '--add-data=app_streamlit.py;.',
+        '--add-data=photo_sorter.py;.',
         '--hidden-import=streamlit',
         '--hidden-import=open_clip',
         '--hidden-import=torch',

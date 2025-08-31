@@ -57,3 +57,4 @@ test-photos/
 sample-photos/
 unsorted/
 sorted/
+/__pycache__
