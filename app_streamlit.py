@@ -25,12 +25,12 @@ from PIL import Image, ExifTags
 import torch
 import open_clip
 
-# Silence the benign open_clip warning
+# Silence the benign open_clip warning about QuickGELU
 warnings.filterwarnings(
-    "ignore",
-    message=r".*QuickGELU mismatch.*",
+    "ignore", 
+    message="QuickGELU mismatch.*",
     category=UserWarning,
-    module="open_clip.factory",
+    module="open_clip.factory"
 )
 
 try:
@@ -441,6 +441,8 @@ with st.sidebar:
                                  help="Skip files if destination already exists (useful for incremental runs)")
     no_overwrite = st.checkbox("No overwrite (--no-overwrite)", value=False, 
                                 help="Error if destination exists instead of auto-renaming (safety guard)")
+    date_folders = st.checkbox("Date folders (--date-folders)", value=False,
+                                help="Organize photos into YYYY/MM subfolders based on EXIF or file date")
 
     st.subheader("Preview sample")
     sample_n = st.number_input("Sample size", min_value=1, max_value=500, value=50, step=1)
@@ -516,13 +518,20 @@ if do_preview and src.exists() and labels_path.exists():
                 img_t = load_image(path, preprocess, device)
                 scores = score_image(model, img_t, text_features, owners, agg=agg)
                 chosen = decide_label(scores, decision, threshold, margin, ratio, topk)
-                year, month = get_exif_year_month(path)
-                target = dst / chosen[0] / f"{year:04d}" / f"{month:02d}" / path.name
+                
+                if date_folders:
+                    year, month = get_exif_year_month(path)
+                    target = dst / chosen[0] / f"{year:04d}" / f"{month:02d}" / path.name
+                    caption_text = f"{path.name}\n→ {chosen[0]} • {year}/{month:02d}"
+                else:
+                    target = dst / chosen[0] / path.name
+                    caption_text = f"{path.name}\n→ {chosen[0]}"
+                    
                 rows.append((path.name, chosen[0], max(scores.items(), key=lambda kv: kv[1])[1], str(target)))
 
                 with cols[i % 4]:
                     st.image(str(path), width='stretch')
-                    st.caption(f"{path.name}\n→ {chosen[0]} • {year}/{month:02d}")
+                    st.caption(caption_text)
             except Exception as e:
                 rows.append((path.name, "_error_", 0.0, f"error: {e}"))
         st.subheader("Planned actions (preview)")
@@ -554,6 +563,8 @@ def build_cli_command():
         exe.append("--skip-existing")
     if no_overwrite:
         exe.append("--no-overwrite")
+    if date_folders:
+        exe.append("--date-folders")
     return exe
 
 

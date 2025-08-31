@@ -10,6 +10,7 @@ Usage:
 import argparse
 import json
 import shutil
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Iterable
@@ -19,6 +20,14 @@ import imagehash
 import torch
 import open_clip
 from tqdm import tqdm
+
+# Silence the benign open_clip warning about QuickGELU
+warnings.filterwarnings(
+    "ignore",
+    message="QuickGELU mismatch.*",
+    category=UserWarning,
+    module="open_clip.factory"
+)
 
 # ----------------------------
 # Helpers
@@ -221,6 +230,7 @@ def main():
     ap.add_argument("--ignore-weights", action="store_true", help="Ignore label weights (treat all as 1.0) to reduce bias")
     ap.add_argument("--skip-existing", action="store_true", help="Skip files if destination already exists (useful for incremental runs)")
     ap.add_argument("--no-overwrite", action="store_true", help="Error if destination exists instead of auto-renaming (safety guard)")
+    ap.add_argument("--date-folders", action="store_true", help="Organize photos into YYYY/MM subfolders based on EXIF or file date")
     args = ap.parse_args()
 
     src = Path(args.src).expanduser().resolve()
@@ -315,13 +325,19 @@ def main():
         if not chosen:
             chosen = ["_unsorted"]
 
-        # Date subfolder
-        year, month = get_exif_datetime(f)
-        ydir = f"{year:04d}/{month:02d}"
+        # Date subfolder (if enabled)
+        if args.date_folders:
+            year, month = get_exif_datetime(f)
+            ydir = f"{year:04d}/{month:02d}"
+        else:
+            ydir = ""
 
         # Move/copy
         for label in chosen:
-            out_dir = dst / label / ydir
+            if ydir:
+                out_dir = dst / label / ydir
+            else:
+                out_dir = dst / label
             target = out_dir / f.name
             try:
                 if args.copy and len(chosen) > 1:

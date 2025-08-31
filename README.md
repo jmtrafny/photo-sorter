@@ -111,7 +111,8 @@ Adjust confidence:
 ### Copy/move behavior
 
 * `--copy` *(bool)*: Copy files instead of moving (safer first run).
-* `--topk <int>` *(default: <b>**************************************************`1`**************************************************</b>)*: Route to top‑K labels; with `--copy` you’ll get duplicates across categories.
+* `--topk <int>` *(default: <b>**************************************************`1`**************************************************</b>)*: Route to top‑K labels; with `--copy` you'll get duplicates across categories.
+* `--date-folders` *(bool)*: Organize photos into YYYY/MM subfolders based on EXIF or file date. Without this flag, photos are placed directly in label folders.
 
 ### Duplicates
 
@@ -130,14 +131,18 @@ Adjust confidence:
 
 ## Folder structure
 
-Each file is routed to:
-
+**With `--date-folders` flag:**
 ```
 <dst>/<category>/<YYYY>/<MM>/<original_filename>
 ```
 
-* EXIF `DateTimeOriginal` is preferred; falls back to file modified time.
-* Low‑confidence images (or when policy rejects the top label) go to `<dst>/_unsorted/<YYYY>/<MM>/`.
+**Without `--date-folders` flag (default):**
+```
+<dst>/<category>/<original_filename>
+```
+
+* When using date folders, EXIF `DateTimeOriginal` is preferred; falls back to file modified time.
+* Low‑confidence images (or when policy rejects the top label) go to `<dst>/_unsorted/` (or `<dst>/_unsorted/<YYYY>/<MM>/` with date folders).
 
 - - -
 
