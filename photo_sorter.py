@@ -503,9 +503,9 @@ def main():
         model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained)
         tokenizer = open_clip.get_tokenizer(model_name)
         model = model.to(device).eval()  # Set to evaluation mode
-        print("✅ Model loaded successfully")
+        print("[OK] Model loaded successfully")
     except Exception as e:
-        print(f"❌ Failed to load CLIP model: {e}")
+        print(f"[ERROR] Failed to load CLIP model: {e}")
         print("This could be due to:")
         print("  - Internet connection required for first-time model download")
         print("  - Insufficient memory (need ~4GB RAM minimum)")
@@ -538,8 +538,8 @@ def main():
         return
         
     if len(files) > 10000:
-        print(f"⚠️  Large collection detected ({len(files)} files). Consider processing in smaller batches.")
-        print("   This may take significant time and memory. Press Ctrl+C to cancel if needed.")
+        print(f"[WARNING] Large collection detected ({len(files)} files). Consider processing in smaller batches.")
+        print("          This may take significant time and memory. Press Ctrl+C to cancel if needed.")
 
     # Process each image file
     for f in tqdm(files, desc="Processing images"):

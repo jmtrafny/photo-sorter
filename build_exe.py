@@ -51,33 +51,33 @@ def build_ui_exe():
     ])
 
 def main():
-    print("🔨 Building Photo Organizer executables...")
+    print("Building Photo Organizer executables...")
     print()
     
     choice = input("Build (1) CLI only, (2) UI only, or (3) both? [3]: ").strip() or "3"
     
     if choice in ["1", "3"]:
-        print("📦 Building CLI executable...")
+        print("Building CLI executable...")
         build_cli_exe()
-        print("✅ CLI executable built: dist/PhotoOrganizer-CLI.exe")
+        print("[OK] CLI executable built: dist/PhotoOrganizer-CLI.exe")
     
     if choice in ["2", "3"]:
-        print("📦 Building UI executable...")
+        print("Building UI executable...")
         build_ui_exe() 
-        print("✅ UI executable built: dist/PhotoOrganizer-UI.exe")
+        print("[OK] UI executable built: dist/PhotoOrganizer-UI.exe")
     
     print()
-    print("🎉 Build complete!")
-    print("📁 Executables are in the 'dist' folder")
+    print("Build complete!")
+    print("Executables are in the 'dist' folder")
     print()
-    print("⚠️  Note: First run requires internet for model download (~150MB)")
-    print("💡 Tip: Test executables before distributing")
+    print("[NOTE] First run requires internet for model download (~150MB)")
+    print("Tip: Test executables before distributing")
 
 if __name__ == "__main__":
     try:
         import PyInstaller
     except ImportError:
-        print("❌ PyInstaller not found. Install with: pip install pyinstaller")
+        print("[ERROR] PyInstaller not found. Install with: pip install pyinstaller")
         sys.exit(1)
     
     main()
