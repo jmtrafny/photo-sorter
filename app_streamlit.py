@@ -536,7 +536,8 @@ with st.sidebar:
                                 help="Organize photos into YYYY/MM subfolders based on EXIF or file date")
 
     st.subheader("Preview sample")
-    sample_n = st.number_input("Sample size", min_value=1, max_value=500, value=50, step=1)
+    sample_n = st.number_input("Sample size", min_value=1, max_value=100, value=20, step=1, 
+                                help="Limit preview size to avoid memory issues. Use 10-20 for quick tests.")
     do_preview = st.button("🔎 Preview sample (dry)")
 
     st.subheader("Full run")
