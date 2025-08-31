@@ -21,6 +21,8 @@ import torch
 import open_clip
 from tqdm import tqdm
 
+from default_labels import DEFAULT_LABELS
+
 # Silence the benign open_clip warning about QuickGELU
 warnings.filterwarnings(
     "ignore",
@@ -33,18 +35,81 @@ warnings.filterwarnings(
 # Helpers
 # ----------------------------
 
-def load_labels(labels_path: Path) -> Dict[str, Dict]:
-    """Load labels.json and ensure each label has a non-empty synonym list.
-    Also inject the base prompt as the first synonym if it's not present."""
-    with open(labels_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+def validate_labels(data: Dict[str, Dict]) -> Tuple[bool, str]:
+    """Validate labels configuration structure.
+    Returns (is_valid, error_message)"""
+    if not isinstance(data, dict):
+        return False, "Labels must be a JSON object/dictionary"
+    
+    if not data:
+        return False, "Labels cannot be empty"
+    
+    for label, cfg in data.items():
+        if not isinstance(cfg, dict):
+            return False, f"Label '{label}' must be an object with 'prompt' and 'synonyms'"
+        
+        if "synonyms" in cfg and not isinstance(cfg["synonyms"], list):
+            return False, f"Label '{label}': 'synonyms' must be an array"
+        
+        if "weight" in cfg:
+            try:
+                float(cfg["weight"])
+            except (TypeError, ValueError):
+                return False, f"Label '{label}': 'weight' must be a number"
+    
+    return True, ""
+
+
+def load_labels(labels_path: Path | None = None, use_builtin: bool = True) -> Dict[str, Dict]:
+    """Load labels configuration with validation.
+    
+    Args:
+        labels_path: Path to custom labels.json file (optional)
+        use_builtin: If True and labels_path is None or invalid, use built-in labels
+    
+    Returns:
+        Dictionary of label configurations
+    """
+    data = None
+    
+    # Try to load custom labels file if provided
+    if labels_path and labels_path.exists():
+        try:
+            with open(labels_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # Validate the loaded data
+            is_valid, error_msg = validate_labels(data)
+            if not is_valid:
+                print(f"[WARNING] Custom labels file is malformed: {error_msg}")
+                if use_builtin:
+                    print("[INFO] Falling back to built-in labels")
+                    data = None
+                else:
+                    raise ValueError(f"Invalid labels file: {error_msg}")
+        except json.JSONDecodeError as e:
+            print(f"[WARNING] Failed to parse labels file: {e}")
+            if use_builtin:
+                print("[INFO] Falling back to built-in labels")
+                data = None
+            else:
+                raise
+    
+    # Use built-in labels if no custom file or if it failed
+    if data is None:
+        if use_builtin:
+            data = DEFAULT_LABELS.copy()
+        else:
+            raise FileNotFoundError(f"Labels file not found: {labels_path}")
+    
+    # Ensure each label has proper structure
     for label, cfg in data.items():
         cfg.setdefault("synonyms", [])
         base_prompt = cfg.get("prompt", label)
         if not cfg["synonyms"] or base_prompt not in cfg["synonyms"]:
             cfg["synonyms"].insert(0, base_prompt)
-        # ensure weight exists
         cfg.setdefault("weight", 1.0)
+    
     return data
 
 
@@ -213,7 +278,7 @@ def main():
     ap = argparse.ArgumentParser(description="Auto-sort photos by content using local zero-shot tagging (OpenCLIP).")
     ap.add_argument("--src", required=True, help="Folder with unsorted images")
     ap.add_argument("--dst", required=True, help="Folder to place sorted images")
-    ap.add_argument("--labels", default="labels.json", help="Path to labels.json")
+    ap.add_argument("--labels", default=None, help="Path to custom labels.json (uses built-in labels if not provided)")
     ap.add_argument("--threshold", type=float, default=0.10, help="Confidence threshold when --decision=threshold (scores are normalized across labels)")
     ap.add_argument("--topk", type=int, default=1, help="Move into the highest scoring label (1) or copy into top-K labels (>1).")
     ap.add_argument("--copy", action="store_true", help="Copy instead of move")
@@ -235,11 +300,16 @@ def main():
 
     src = Path(args.src).expanduser().resolve()
     dst = Path(args.dst).expanduser().resolve()
-    labels_path = Path(args.labels).expanduser().resolve()
+    labels_path = Path(args.labels).expanduser().resolve() if args.labels else None
     assert src.exists() and src.is_dir(), f"Source folder not found: {src}"
-    assert labels_path.exists(), f"labels.json not found at {labels_path}"
-
-    labels_cfg = load_labels(labels_path)
+    
+    # Load labels (built-in or custom)
+    if labels_path:
+        print(f"Using custom labels from: {labels_path}")
+    else:
+        print("Using built-in labels")
+    
+    labels_cfg = load_labels(labels_path, use_builtin=True)
 
     # Model
     device = "cuda" if torch.cuda.is_available() else "cpu"

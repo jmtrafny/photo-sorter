@@ -25,6 +25,8 @@ from PIL import Image, ExifTags
 import torch
 import open_clip
 
+from default_labels import DEFAULT_LABELS
+
 # Silence the benign open_clip warning about QuickGELU
 warnings.filterwarnings(
     "ignore", 
@@ -249,16 +251,70 @@ def pick_directory(initial: str | Path | None = None) -> str | None:
 # Shared logic (mirrors CLI)
 # ----------------------------
 
-def load_labels(labels_path: Path) -> Dict[str, Dict]:
-    with open(labels_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+def validate_labels(data: Dict[str, Dict]) -> Tuple[bool, str]:
+    """Validate labels configuration structure."""
+    if not isinstance(data, dict):
+        return False, "Labels must be a JSON object/dictionary"
+    
+    if not data:
+        return False, "Labels cannot be empty"
+    
+    for label, cfg in data.items():
+        if not isinstance(cfg, dict):
+            return False, f"Label '{label}' must be an object with 'prompt' and 'synonyms'"
+        
+        if "synonyms" in cfg and not isinstance(cfg["synonyms"], list):
+            return False, f"Label '{label}': 'synonyms' must be an array"
+        
+        if "weight" in cfg:
+            try:
+                float(cfg["weight"])
+            except (TypeError, ValueError):
+                return False, f"Label '{label}': 'weight' must be a number"
+    
+    return True, ""
+
+
+def load_labels(labels_path: Path | None = None, use_builtin: bool = True) -> Tuple[Dict[str, Dict], str]:
+    """Load labels with validation. Returns (labels_dict, status_message)"""
+    data = None
+    status = ""
+    
+    if labels_path and labels_path.exists():
+        try:
+            with open(labels_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            is_valid, error_msg = validate_labels(data)
+            if not is_valid:
+                if use_builtin:
+                    status = f"⚠️ Custom labels malformed: {error_msg}. Using built-in labels."
+                    data = None
+                else:
+                    raise ValueError(f"Invalid labels: {error_msg}")
+            else:
+                status = f"✅ Using custom labels from {labels_path.name}"
+        except json.JSONDecodeError as e:
+            if use_builtin:
+                status = f"⚠️ Failed to parse labels file: {e}. Using built-in labels."
+                data = None
+            else:
+                raise
+    
+    if data is None:
+        data = DEFAULT_LABELS.copy()
+        if not status:
+            status = "✅ Using built-in labels"
+    
+    # Ensure proper structure
     for label, cfg in data.items():
         cfg.setdefault("synonyms", [])
         base_prompt = cfg.get("prompt", label)
         if not cfg["synonyms"] or base_prompt not in cfg["synonyms"]:
             cfg["synonyms"].insert(0, base_prompt)
         cfg.setdefault("weight", 1.0)
-    return data
+    
+    return data, status
 
 
 def _prompt_variants(syn: str, rich: bool) -> List[str]:
@@ -410,9 +466,19 @@ with st.sidebar:
                 st.session_state.dst_str = picked
                 st.rerun()
 
-    # Labels file - keep as text input for now since it's a file path not a folder
-    st.session_state.labels_str = st.text_input("Labels file (--labels)", value=st.session_state.labels_str,
-                                                 help="JSON file defining categories with prompts, synonyms, and weights")
+    # Labels configuration selector
+    st.markdown("**Labels Configuration**")
+    use_custom = st.checkbox("Use custom labels file", value=False,
+                             help="Check to use a custom labels.json file instead of built-in labels")
+    
+    if use_custom:
+        st.session_state.labels_str = st.text_input("Custom labels path", 
+                                                    value=st.session_state.get("labels_str", "labels.json"),
+                                                    help="Path to custom JSON file defining categories")
+        labels_path = Path(st.session_state.labels_str)
+    else:
+        labels_path = None
+        st.info("Using built-in labels (people, pets, landscape, food, etc.)")
 
     st.subheader("Routing")
     agg = st.selectbox("Aggregation (--agg)", ["max", "mean", "sum"], index=0,
@@ -455,17 +521,22 @@ with st.sidebar:
 # Materialize paths from session state
 src = Path(st.session_state.src_str)
 dst = Path(st.session_state.dst_str)
-labels_path = Path(st.session_state.labels_str)
 
 # Warnings for missing paths
 if not src.exists():
     st.warning("Source folder does not exist.")
-if not labels_path.exists():
-    st.warning("labels.json not found.")
+
+# Load and validate labels
+if use_custom and st.session_state.get("labels_str"):
+    custom_path = Path(st.session_state.labels_str)
+    if not custom_path.exists():
+        st.warning(f"Custom labels file not found: {custom_path}")
+else:
+    custom_path = None
 
 
 @st.cache_resource(show_spinner=True)
-def get_model_and_text_features(labels_path: Path, rich_prompts: bool, ignore_weights: bool):
+def get_model_and_text_features(labels_path: Path | None, rich_prompts: bool, ignore_weights: bool, use_builtin: bool = True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_name = "ViT-B-32"
     pretrained = "openai"
@@ -473,7 +544,7 @@ def get_model_and_text_features(labels_path: Path, rich_prompts: bool, ignore_we
     tokenizer = open_clip.get_tokenizer(model_name)
     model = model.to(device).eval()
 
-    labels_cfg = load_labels(labels_path)
+    labels_cfg, status = load_labels(labels_path, use_builtin=use_builtin)
     text_features, owners, prompts = build_text_tokens(
         model, tokenizer, labels_cfg, device, rich_prompts, ignore_weights
     )
@@ -484,6 +555,7 @@ def get_model_and_text_features(labels_path: Path, rich_prompts: bool, ignore_we
         "text_features": text_features,
         "owners": owners,
         "prompts": prompts,
+        "labels_status": status,
     }
 
 
@@ -496,7 +568,7 @@ def list_images(folder: Path) -> List[Path]:
     return imgs
 
 
-if do_preview and src.exists() and labels_path.exists():
+if do_preview and src.exists():
     imgs = list_images(src)
     if not imgs:
         st.info("No supported images found in source folder.")
@@ -504,7 +576,9 @@ if do_preview and src.exists() and labels_path.exists():
         sample = imgs if len(imgs) <= sample_n else random.sample(imgs, sample_n)
         st.write(f"Previewing **{len(sample)}** of **{len(imgs)}** images from `{src}`.")
 
-        bundle = get_model_and_text_features(labels_path, rich_prompts, ignore_weights)
+        bundle = get_model_and_text_features(labels_path if use_custom else None, rich_prompts, ignore_weights)
+        if bundle["labels_status"]:
+            st.info(bundle["labels_status"])
         model = bundle["model"]
         preprocess = bundle["preprocess"]
         text_features = bundle["text_features"]
@@ -543,14 +617,20 @@ if do_preview and src.exists() and labels_path.exists():
 def build_cli_command():
     exe = [sys.executable, "photo_sorter.py",
            "--src", str(src),
-           "--dst", str(dst),
-           "--labels", str(labels_path),
+           "--dst", str(dst)]
+    
+    # Add custom labels if specified
+    if use_custom and labels_path:
+        exe.extend(["--labels", str(labels_path)])
+    
+    exe.extend([
            "--agg", agg,
            "--decision", decision,
            "--topk", str(topk),
            "--threshold", str(threshold),
            "--margin", str(margin),
-           "--ratio", str(ratio)]
+           "--ratio", str(ratio)])
+    
     if copy:
         exe.append("--copy")
     if dedupe:
@@ -588,8 +668,10 @@ def run_cli(exe: List[str]):
 
 
 if run_copy or run_move:
-    if not src.exists() or not labels_path.exists():
-        st.error("Please fix source/labels paths before running.")
+    if not src.exists():
+        st.error("Please fix source path before running.")
+    elif use_custom and labels_path and not labels_path.exists():
+        st.error("Custom labels file not found. Please fix the path or use built-in labels.")
     else:
         exe = build_cli_command()
         if run_move:
