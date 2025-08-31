@@ -5,37 +5,38 @@
 Photo Organizer is an AI-powered tool for automatically sorting photos using zero-shot image classification. It uses OpenCLIP (OpenAI's CLIP model) to analyze image content locally and organize photos into categories without requiring any training data.
 
 ### Key Features
-- **Zero-shot classification**: No training required, works on any photo collection
-- **Local processing**: No cloud APIs, all computation happens on your machine
-- **Multiple interfaces**: Both CLI and web UI available
-- **Flexible organization**: Category-based or date-based folder structures
-- **Duplicate detection**: Perceptual hashing to identify near-duplicates
-- **Built-in labels**: Works out-of-the-box with sensible defaults
+
+* **Zero-shot classification**: No training required, works on any photo collection
+* **Local processing**: No cloud APIs, all computation happens on your machine
+* **Multiple interfaces**: Both CLI and web UI available
+* **Flexible organization**: Category-based or date-based folder structures
+* **Duplicate detection**: Perceptual hashing to identify near-duplicates
+* **Built-in labels**: Works out-of-the-box with sensible defaults
 
 ## Architecture
 
 ### Core Components
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   User Input    │    │  CLIP Model     │    │   File System  │
-│                 │    │                 │    │                 │
-│ CLI/Streamlit   │───▶│ Image Encoder   │───▶│  Sorted Photos  │
-│ UI              │    │ Text Encoder    │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   User Input    │     │  CLIP Model     │     │   File System   │
+│                 │     │                 │     │                 │
+│ CLI/Streamlit   │───▶│ Image Encoder   │───▶│  Sorted Photos   │
+│ UI              │     │ Text Encoder    │     │                 │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
          │                       │
-         │              ┌─────────────────┐
-         └─────────────▶│ Label Config    │
-                        │ (built-in/custom)│
-                        └─────────────────┘
+         │               ┌──────────────────┐
+         └─────────────▶│ Label Config     │
+                         │ (built-in/custom)│
+                         └──────────────────┘
 ```
 
 ### File Structure
 
 ```
-photo-organizer/
+
 ├── photo_sorter.py      # CLI implementation
-├── app_streamlit.py     # Web UI implementation  
+├── app_streamlit.py     # Web UI implementation
 ├── default_labels.py    # Built-in label configurations
 ├── undo.py             # Undo functionality
 ├── README.md           # User documentation
@@ -45,143 +46,162 @@ photo-organizer/
 
 ## Core Technologies
 
-### 1. OpenCLIP (Computer Vision)
+### 1\. OpenCLIP \(Computer Vision\)
 
 **What it is**: An open-source implementation of OpenAI's CLIP (Contrastive Language-Image Pre-training) model.
 
 **How it works**:
-- Encodes images and text into the same embedding space
-- Enables zero-shot classification by comparing image embeddings to text embeddings
-- Uses cosine similarity to measure relevance between images and text prompts
+
+* Encodes images and text into the same embedding space
+* Enables zero-shot classification by comparing image embeddings to text embeddings
+* Uses cosine similarity to measure relevance between images and text prompts
 
 **Model used**: `ViT-B/32` (Vision Transformer with 32×32 patches)
-- Balance between accuracy and speed
-- ~150MB model size
-- Good performance on diverse image types
+
+* Balance between accuracy and speed
+* \~150MB model size
+* Good performance on diverse image types
 
 **Key files**: `photo_sorter.py:build_text_tokens()`, `score_labels()`
 
 **Resources**:
-- [OpenCLIP GitHub](https://github.com/mlfoundations/open_clip)
-- [CLIP Paper](https://arxiv.org/abs/2103.00020)
-- [Hugging Face OpenCLIP](https://huggingface.co/docs/transformers/model_doc/clip)
 
-### 2. Streamlit (Web UI)
+* [OpenCLIP GitHub](https://github.com/mlfoundations/open_clip)
+* [CLIP Paper](https://arxiv.org/abs/2103.00020)
+* [Hugging Face OpenCLIP](https://huggingface.co/docs/transformers/model_doc/clip)
+
+### 2\. Streamlit \(Web UI\)
 
 **What it is**: Python framework for building data apps with minimal frontend code.
 
 **Why chosen**:
-- Rapid prototyping for ML applications
-- Built-in caching for expensive operations (model loading)
-- Real-time parameter tuning with widgets
-- Easy deployment
+
+* Rapid prototyping for ML applications
+* Built-in caching for expensive operations (model loading)
+* Real-time parameter tuning with widgets
+* Easy deployment
 
 **Key features used**:
-- `@st.cache_resource`: Cache model loading
-- `@st.cache_data`: Cache file scanning
-- Sidebar widgets for parameters
-- Real-time subprocess output streaming
+
+* `@st.cache_resource`: Cache model loading
+* `@st.cache_data`: Cache file scanning
+* Sidebar widgets for parameters
+* Real-time subprocess output streaming
 
 **Key files**: `app_streamlit.py`
 
 **Resources**:
-- [Streamlit Documentation](https://docs.streamlit.io/)
-- [Streamlit Gallery](https://streamlit.io/gallery)
 
-### 3. PIL/Pillow (Image Processing)
+* [Streamlit Documentation](https://docs.streamlit.io/)
+* [Streamlit Gallery](https://streamlit.io/gallery)
+
+### 3\. PIL/Pillow \(Image Processing\)
 
 **What it is**: Python Imaging Library for image manipulation.
 
 **Usage**:
-- Loading and preprocessing images for CLIP
-- EXIF metadata extraction for date organization
-- Format conversion (ensure RGB)
+
+* Loading and preprocessing images for CLIP
+* EXIF metadata extraction for date organization
+* Format conversion (ensure RGB)
 
 **Key files**: `photo_sorter.py:load_image()`, `get_exif_datetime()`
 
 **Resources**:
-- [Pillow Documentation](https://pillow.readthedocs.io/)
-- [EXIF Tags Reference](https://exiv2.org/tags.html)
 
-### 4. ImageHash (Duplicate Detection)
+* [Pillow Documentation](https://pillow.readthedocs.io/)
+* [EXIF Tags Reference](https://exiv2.org/tags.html)
+
+### 4\. ImageHash \(Duplicate Detection\)
 
 **What it is**: Perceptual hashing library for finding similar images.
 
 **How it works**:
-- Creates compact hash representing image content
-- Similar images have similar hashes (even with different sizes/compression)
-- Uses average hash algorithm for speed
+
+* Creates compact hash representing image content
+* Similar images have similar hashes (even with different sizes/compression)
+* Uses average hash algorithm for speed
 
 **Key files**: `photo_sorter.py:compute_phash()`
 
 **Resources**:
-- [ImageHash GitHub](https://github.com/JohannesBuchner/imagehash)
-- [Perceptual Hashing Explained](https://www.hackerfactor.com/blog/index.php?/archives/432-Looks-Like-It.html)
+
+* [ImageHash GitHub](https://github.com/JohannesBuchner/imagehash)
+* [Perceptual Hashing Explained](https://www.hackerfactor.com/blog/index.php?/archives/432-Looks-Like-It.html)
 
 ## Code Organization
 
-### photo_sorter.py (CLI)
+### photo\_sorter.py (CLI)
 
 **Main functions**:
-- `main()`: Entry point, argument parsing
-- `load_labels()`: Load and validate label configurations
-- `build_text_tokens()`: Encode all text prompts with CLIP
-- `score_labels()`: Compare image to text embeddings
-- `get_exif_datetime()`: Extract date from image metadata
-- `safe_move()`/`safe_copy()`: File operations with collision handling
+
+* `main()`: Entry point, argument parsing
+* `load_labels()`: Load and validate label configurations
+* `build_text_tokens()`: Encode all text prompts with CLIP
+* `score_labels()`: Compare image to text embeddings
+* `get_exif_datetime()`: Extract date from image metadata
+* `safe_move()`/`safe_copy()`: File operations with collision handling
 
 **Processing flow**:
+
 1. Load CLIP model and text embeddings
 2. Scan for image files recursively
 3. For each image:
-   - Check for duplicates (if enabled)
-   - Classify with CLIP
-   - Apply decision policy
-   - Move/copy to appropriate folder
+    * Check for duplicates (if enabled)
+    * Classify with CLIP
+    * Apply decision policy
+    * Move/copy to appropriate folder
 
-### app_streamlit.py (Web UI)
+### app\_streamlit.py (Web UI)
 
 **Main functions**:
-- `get_model_and_text_features()`: Cached model/embeddings loading
-- `pick_directory()`: Native folder picker integration
-- `build_cli_command()`: Translate UI settings to CLI args
-- `run_cli()`: Execute CLI subprocess with real-time output
+
+* `get_model_and_text_features()`: Cached model/embeddings loading
+* `pick_directory()`: Native folder picker integration
+* `build_cli_command()`: Translate UI settings to CLI args
+* `run_cli()`: Execute CLI subprocess with real-time output
 
 **UI Architecture**:
-- Sidebar: Configuration and controls
-- Main area: Preview and results
-- WebSocket: Browser connection monitoring for auto-shutdown
+
+* Sidebar: Configuration and controls
+* Main area: Preview and results
+* WebSocket: Browser connection monitoring for auto-shutdown
 
 **Caching strategy**:
-- Model loading: Cached by label config and parameters
-- File scanning: Cached by directory path
-- Text encoding: Part of model cache
 
-### default_labels.py
+* Model loading: Cached by label config and parameters
+* File scanning: Cached by directory path
+* Text encoding: Part of model cache
+
+### default\_labels.py
 
 **Purpose**: Provides built-in label configurations eliminating need for external files.
 
 **Categories included**:
-- people, pets, landscape, food, documents
-- screenshots, cars, flowers, kids, events
+
+* people, pets, landscape, food, documents
+* screenshots, cars, flowers, kids, events
 
 **Design principles**:
-- Balanced synonym lists (avoid bias)
-- Cover common photo types
-- Weight adjustment for over/under-active categories
+
+* Balanced synonym lists (avoid bias)
+* Cover common photo types
+* Weight adjustment for over/under-active categories
 
 ## Development Patterns
 
 ### Error Handling
 
 **Philosophy**: Graceful degradation with user feedback
-- Invalid files are skipped with warnings
-- Malformed configs fall back to built-in labels  
-- Processing errors don't stop the entire operation
-- Clear error messages guide user actions
+
+* Invalid files are skipped with warnings
+* Malformed configs fall back to built-in labels
+* Processing errors don't stop the entire operation
+* Clear error messages guide user actions
 
 **Examples**:
-```python
+
+``` python
 # Graceful fallback for labels
 try:
     data = json.load(f)
@@ -196,14 +216,16 @@ except json.JSONDecodeError:
 ### Validation
 
 **Input validation**:
-- File paths: Check existence and permissions
-- JSON configs: Validate structure and types
-- Parameters: Range checking on thresholds/ratios
+
+* File paths: Check existence and permissions
+* JSON configs: Validate structure and types
+* Parameters: Range checking on thresholds/ratios
 
 **Model validation**:
-- Device availability (CUDA vs CPU)
-- Model loading success
-- Text encoding success
+
+* Device availability (CUDA vs CPU)
+* Model loading success
+* Text encoding success
 
 ### Performance Optimization
 
@@ -219,16 +241,17 @@ The classification system uses configurable decision policies:
 ### Policies
 
 1. **Threshold**: Accept if `top_score >= threshold`
-2. **Margin**: Accept if `(top1 - top2) >= margin`  
+2. **Margin**: Accept if `(top1 - top2) >= margin`
 3. **Ratio**: Accept if `(top1 / top2) >= ratio`
 4. **Always-top1**: Always accept highest score
 
 ### Score Aggregation
 
 Multiple synonyms per label require aggregation:
-- **Max**: Take highest score (prevents synonym-count bias)
-- **Mean**: Average all scores 
-- **Sum**: Add all scores (can bias toward labels with many synonyms)
+
+* **Max**: Take highest score (prevents synonym-count bias)
+* **Mean**: Average all scores
+* **Sum**: Add all scores (can bias toward labels with many synonyms)
 
 ### Normalization
 
@@ -238,7 +261,7 @@ Scores are normalized across all labels to sum to 1.0, making thresholds compara
 
 ### Label Configuration Format
 
-```json
+``` json
 {
   "category_name": {
     "prompt": "base prompt text",
@@ -251,16 +274,18 @@ Scores are normalized across all labels to sum to 1.0, making thresholds compara
 ### Recommended Practices
 
 **Synonym selection**:
-- Include both formal and casual terms
-- Cover different visual contexts  
-- Avoid overlap between categories
-- Test with your specific image collection
+
+* Include both formal and casual terms
+* Cover different visual contexts
+* Avoid overlap between categories
+* Test with your specific image collection
 
 **Weight tuning**:
-- Start with 1.0 for all categories
-- Increase weights for under-represented categories
-- Decrease weights for over-active categories
-- Use `--debug-scores` to analyze performance
+
+* Start with 1.0 for all categories
+* Increase weights for under-represented categories
+* Decrease weights for over-active categories
+* Use `--debug-scores` to analyze performance
 
 ## Packaging for Distribution
 
@@ -269,23 +294,27 @@ Scores are normalized across all labels to sum to 1.0, making thresholds compara
 The application is designed to be packaged into a standalone executable:
 
 **Benefits of current design**:
-- Built-in labels eliminate external file dependencies
-- Graceful fallback for missing dependencies
-- Clear error messages for troubleshooting
+
+* Built-in labels eliminate external file dependencies
+* Graceful fallback for missing dependencies
+* Clear error messages for troubleshooting
 
 **Recommended tools**:
-- **PyInstaller**: Most popular, good CLIP support
-- **cx_Freeze**: Cross-platform alternative
-- **Nuitka**: Performance-oriented compilation
+
+* **PyInstaller**: Most popular, good CLIP support
+* **cx\_Freeze**: Cross-platform alternative
+* **Nuitka**: Performance-oriented compilation
 
 **Considerations**:
-- Large executable size due to PyTorch/CLIP
-- GPU support requires CUDA libraries
-- Model weights are embedded in executable
+
+* Large executable size due to PyTorch/CLIP
+* GPU support requires CUDA libraries
+* Model weights are embedded in executable
 
 ### Dependencies
 
 **Core requirements**:
+
 ```
 torch>=1.13.0
 open-clip-torch>=2.20.0
@@ -297,56 +326,64 @@ websockets>=12.0
 ```
 
 **Optional**:
-- tkinter (usually bundled with Python)
-- CUDA libraries (for GPU acceleration)
+
+* tkinter (usually bundled with Python)
+* CUDA libraries (for GPU acceleration)
 
 ## Testing Strategy
 
 ### Manual Testing Checklist
 
 **CLI testing**:
-- [ ] Dry run with sample images
-- [ ] Different decision policies
-- [ ] Custom vs built-in labels
-- [ ] Error conditions (missing files, invalid JSON)
+
+* [ ] Dry run with sample images
+* [ ] Different decision policies
+* [ ] Custom vs built-in labels
+* [ ] Error conditions (missing files, invalid JSON)
 
 **UI testing**:
-- [ ] Folder picker functionality
-- [ ] Preview accuracy
-- [ ] Parameter changes reflected in CLI command
-- [ ] Auto-shutdown behavior
+
+* [ ] Folder picker functionality
+* [ ] Preview accuracy
+* [ ] Parameter changes reflected in CLI command
+* [ ] Auto-shutdown behavior
 
 **Cross-platform**:
-- [ ] Windows, macOS, Linux compatibility
-- [ ] Path handling (backslashes vs forward slashes)
-- [ ] Permission issues
+
+* [ ] Windows, macOS, Linux compatibility
+* [ ] Path handling (backslashes vs forward slashes)
+* [ ] Permission issues
 
 ### Performance Testing
 
 **Metrics to monitor**:
-- Images processed per second
-- Memory usage during processing
-- Model loading time
-- UI responsiveness during processing
+
+* Images processed per second
+* Memory usage during processing
+* Model loading time
+* UI responsiveness during processing
 
 **Test datasets**:
-- Small set (~50 images): Quick iteration
-- Medium set (~500 images): Real usage simulation
-- Large set (~5000+ images): Stress testing
+
+* Small set (\~50 images): Quick iteration
+* Medium set (\~500 images): Real usage simulation
+* Large set (\~5000+ images): Stress testing
 
 ## Deployment Considerations
 
 ### System Requirements
 
 **Minimum**:
-- 4GB RAM (8GB recommended)
-- 2GB disk space
-- CPU: Any modern processor
+
+* 4GB RAM (8GB recommended)
+* 2GB disk space
+* CPU: Any modern processor
 
 **Optimal**:
-- 16GB+ RAM for large collections
-- NVIDIA GPU with CUDA support
-- SSD for faster image loading
+
+* 16GB+ RAM for large collections
+* NVIDIA GPU with CUDA support
+* SSD for faster image loading
 
 ### Security Considerations
 
@@ -360,32 +397,38 @@ websockets>=12.0
 
 ### Common Issues
 
-**"No module named open_clip"**
-- Solution: Install requirements.txt dependencies
+**"No module named open\_clip"**
+
+* Solution: Install requirements.txt dependencies
 
 **"CUDA out of memory"**
-- Solution: Process smaller batches or use CPU mode
-- Code: Add `--device cpu` flag (if implemented)
+
+* Solution: Process smaller batches or use CPU mode
+* Code: Add `--device cpu` flag (if implemented)
 
 **"Permission denied"**
-- Solution: Check file/folder permissions
-- Common on: Network drives, restricted folders
+
+* Solution: Check file/folder permissions
+* Common on: Network drives, restricted folders
 
 **Images not being classified correctly**
-- Solution: Review and adjust labels
-- Debug with: `--debug-scores --debug-prompts` flags
+
+* Solution: Review and adjust labels
+* Debug with: `--debug-scores --debug-prompts` flags
 
 ### Debugging Tools
 
 **CLI flags for debugging**:
-- `--debug-scores`: Show top classification scores
-- `--debug-prompts`: Show which prompts matched
-- `--dry-run`: Preview actions without moving files
+
+* `--debug-scores`: Show top classification scores
+* `--debug-prompts`: Show which prompts matched
+* `--dry-run`: Preview actions without moving files
 
 **Log analysis**:
-- Look for [WARNING] messages about failed processing
-- Check classification scores for confidence levels
-- Review actual vs expected categorization
+
+* Look for [WARNING] messages about failed processing
+* Check classification scores for confidence levels
+* Review actual vs expected categorization
 
 ## Extension Points
 
@@ -399,7 +442,8 @@ websockets>=12.0
 ### Custom Decision Policies
 
 Extend `decide_label()` function in both CLI and UI:
-```python
+
+``` python
 elif policy == "custom":
     # Implement your logic here
     accept = custom_decision_logic(scores)
@@ -408,7 +452,8 @@ elif policy == "custom":
 ### Additional File Formats
 
 Add to `SUPPORTED_EXTS` in both files:
-```python
+
+``` python
 SUPPORTED_EXTS.add(".heic")  # iPhone photos
 ```
 
@@ -417,53 +462,60 @@ Ensure PIL/Pillow supports the format.
 ### Alternative Models
 
 Replace CLIP model in `get_model_and_text_features()`:
-- Different CLIP variants (ViT-L/14, RN50, etc.)
-- Other vision-language models
-- Custom fine-tuned models
+
+* Different CLIP variants (ViT-L/14, RN50, etc.)
+* Other vision-language models
+* Custom fine-tuned models
 
 ## Contributing
 
 ### Code Style
-- Follow existing patterns and naming conventions
-- Add docstrings for all functions
-- Include type hints where helpful
-- Comment complex logic thoroughly
+
+* Follow existing patterns and naming conventions
+* Add docstrings for all functions
+* Include type hints where helpful
+* Comment complex logic thoroughly
 
 ### Testing
-- Test on multiple platforms
-- Validate with different image types
-- Check edge cases (empty folders, corrupted files)
-- Performance test with large collections
+
+* Test on multiple platforms
+* Validate with different image types
+* Check edge cases (empty folders, corrupted files)
+* Performance test with large collections
 
 ### Documentation
-- Update README.md for user-facing changes
-- Update DEVREADME.md for technical changes
-- Include examples for new features
-- Document breaking changes clearly
+
+* Update README.md for user-facing changes
+* Update DEVREADME.md for technical changes
+* Include examples for new features
+* Document breaking changes clearly
 
 ## Resources & References
 
 ### Computer Vision & AI
-- [OpenAI CLIP Paper](https://arxiv.org/abs/2103.00020)
-- [Vision Transformers Explained](https://arxiv.org/abs/2010.11929)
-- [Zero-shot Learning Survey](https://arxiv.org/abs/1707.00600)
+
+* [OpenAI CLIP Paper](https://arxiv.org/abs/2103.00020)
+* [Vision Transformers Explained](https://arxiv.org/abs/2010.11929)
+* [Zero-shot Learning Survey](https://arxiv.org/abs/1707.00600)
 
 ### Python Libraries
-- [PyTorch Tutorials](https://pytorch.org/tutorials/)
-- [Streamlit Documentation](https://docs.streamlit.io/)
-- [Pillow Handbook](https://pillow.readthedocs.io/en/stable/handbook/)
+
+* [PyTorch Tutorials](https://pytorch.org/tutorials/)
+* [Streamlit Documentation](https://docs.streamlit.io/)
+* [Pillow Handbook](https://pillow.readthedocs.io/en/stable/handbook/)
 
 ### Image Processing
-- [Digital Image Processing (Gonzalez & Woods)](https://www.imageprocessingplace.com/)
-- [Computer Vision: Algorithms and Applications](http://szeliski.org/Book/)
+
+* [Digital Image Processing (Gonzalez & Woods)](https://www.imageprocessingplace.com/)
+* [Computer Vision: Algorithms and Applications](http://szeliski.org/Book/)
 
 ### Development Tools
-- [PyInstaller Documentation](https://pyinstaller.readthedocs.io/)
-- [Python Packaging Guide](https://packaging.python.org/)
-- [Git Workflow Best Practices](https://www.atlassian.com/git/workflows)
 
----
+* [PyInstaller Documentation](https://pyinstaller.readthedocs.io/)
+* [Python Packaging Guide](https://packaging.python.org/)
+* [Git Workflow Best Practices](https://www.atlassian.com/git/workflows)
 
-**Last Updated**: 2024-01-XX  
-**Maintainer**: [Your Name]  
-**Contact**: [Your Email]
+- - -
+
+**Last Updated**: 2025-08-30
+**Maintainer**: James M. Trafny
