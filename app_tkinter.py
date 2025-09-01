@@ -52,6 +52,7 @@ class PhotoOrganizerApp:
         self.process_thread = None
         self.process_queue = queue.Queue()
         self.is_processing = False
+        self.file_operations = []  # Track all file operations for summary table
         
         # Setup UI
         self.setup_styles()
@@ -263,15 +264,15 @@ class PhotoOrganizerApp:
         button_frame = ttk.Frame(settings_frame)
         button_frame.grid(row=current_row, column=0, columnspan=2, pady=10)
         
-        self.preview_btn = ttk.Button(button_frame, text="🔍 Preview (Dry Run)", 
+        self.preview_btn = ttk.Button(button_frame, text="Preview (Dry Run)", 
                                      command=self.preview_sort)
         self.preview_btn.grid(row=0, column=0, padx=5)
         
-        self.run_btn = ttk.Button(button_frame, text="▶ Run Full Sort", 
+        self.run_btn = ttk.Button(button_frame, text="Run Full Sort", 
                                  command=self.run_sort)
         self.run_btn.grid(row=0, column=1, padx=5)
         
-        self.stop_btn = ttk.Button(button_frame, text="⏹ Stop", 
+        self.stop_btn = ttk.Button(button_frame, text="Stop", 
                                   command=self.stop_sort, state='disabled')
         self.stop_btn.grid(row=0, column=2, padx=5)
     
@@ -495,7 +496,9 @@ class PhotoOrganizerApp:
     
     def build_command(self, dry_run=False):
         """Build command line arguments for photo_sorter.py."""
-        cmd = [sys.executable, "photo_sorter.py",
+        # For bundled version, we'll call photo_sorter directly in run_subprocess
+        # This returns the arguments that would be passed to photo_sorter.main()
+        args = [
                "--src", self.source_var.get(),
                "--dst", self.dest_var.get(),
                "--agg", self.agg_var.get(),
@@ -506,24 +509,30 @@ class PhotoOrganizerApp:
                "--topk", str(self.topk_var.get())]
         
         if self.use_custom_labels.get() and self.labels_var.get():
-            cmd.extend(["--labels", self.labels_var.get()])
+            args.extend(["--labels", self.labels_var.get()])
         
         if self.copy_mode.get():
-            cmd.append("--copy")
+            args.append("--copy")
         if self.dedupe.get():
-            cmd.append("--dedupe")
+            args.append("--dedupe")
         if self.date_folders.get():
-            cmd.append("--date-folders")
+            args.append("--date-folders")
         if self.rich_prompts.get():
-            cmd.append("--rich-prompts")
+            args.append("--rich-prompts")
         if self.ignore_weights.get():
-            cmd.append("--ignore-weights")
+            args.append("--ignore-weights")
         
         if dry_run:
-            cmd.append("--dry-run")
-            cmd.append("--debug-scores")
+            args.append("--dry-run")
+            args.append("--debug-scores")
         
-        return cmd
+        # Check if running from PyInstaller bundle
+        if getattr(sys, 'frozen', False):
+            # Return args for direct function call
+            return args
+        else:
+            # Return full command for subprocess
+            return [sys.executable, "photo_sorter.py"] + args
     
     def preview_sort(self):
         """Run preview/dry-run to show what would happen."""
@@ -576,29 +585,78 @@ class PhotoOrganizerApp:
         
         def run_process():
             try:
-                self.process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
-                
-                for line in self.process.stdout:
-                    self.process_queue.put(('output', line.strip()))
-                
-                self.process.wait()
-                
-                if self.process.returncode == 0:
-                    self.process_queue.put(('complete', 'success'))
+                # Check if running from PyInstaller bundle
+                if getattr(sys, 'frozen', False):
+                    # Running from bundle - call photo_sorter directly in thread
+                    import photo_sorter
+                    import io
+                    from contextlib import redirect_stdout, redirect_stderr
+                    
+                    # Capture output
+                    output_buffer = io.StringIO()
+                    
+                    try:
+                        # Backup original sys.argv
+                        original_argv = sys.argv[:]
+                        # Set sys.argv as if called from command line
+                        sys.argv = ['photo_sorter.py'] + cmd
+                        
+                        with redirect_stdout(output_buffer), redirect_stderr(output_buffer):
+                            photo_sorter.main()
+                            
+                        # Send output line by line
+                        for line in output_buffer.getvalue().split('\n'):
+                            if line.strip():
+                                self.process_queue.put(('output', line.strip()))
+                        
+                        # Send completion - no SystemExit should occur if we reach here
+                        self.process_queue.put(('complete', 'success'))
+                        
+                    except SystemExit as e:
+                        # Send output that was captured before the SystemExit
+                        for line in output_buffer.getvalue().split('\n'):
+                            if line.strip():
+                                self.process_queue.put(('output', line.strip()))
+                        
+                        if e.code == 0:
+                            self.process_queue.put(('complete', 'success'))
+                        else:
+                            self.process_queue.put(('complete', f'error:{e.code}'))
+                    except Exception as e:
+                        # Send any captured output before the error
+                        for line in output_buffer.getvalue().split('\n'):
+                            if line.strip():
+                                self.process_queue.put(('output', line.strip()))
+                        self.process_queue.put(('error', str(e)))
+                    finally:
+                        # Restore original sys.argv
+                        sys.argv = original_argv
                 else:
-                    self.process_queue.put(('complete', f'error:{self.process.returncode}'))
+                    # Running from source - use subprocess
+                    self.process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        universal_newlines=True
+                    )
+                    
+                    for line in self.process.stdout:
+                        self.process_queue.put(('output', line.strip()))
+                    
+                    self.process.wait()
+                    
+                    if self.process.returncode == 0:
+                        self.process_queue.put(('complete', 'success'))
+                    else:
+                        self.process_queue.put(('complete', f'error:{self.process.returncode}'))
                     
             except Exception as e:
                 self.process_queue.put(('error', str(e)))
             finally:
-                self.process = None
+                if hasattr(self, 'process'):
+                    self.process = None
         
         self.process_thread = threading.Thread(target=run_process, daemon=True)
         self.process_thread.start()
@@ -629,7 +687,7 @@ class PhotoOrganizerApp:
                         except:
                             pass
                     
-                    # Parse preview images from dry-run output
+                    # Parse preview images from dry-run output and collect operations
                     if '[MOVE]' in msg_data or '[COPY]' in msg_data or '[DUP]' in msg_data:
                         try:
                             # Extract source and destination paths
@@ -638,6 +696,23 @@ class PhotoOrganizerApp:
                             if len(parts) == 2:
                                 source_part = parts[0].split('] ', 1)[1] if '] ' in parts[0] else parts[0]
                                 dest_part = parts[1].strip()
+                                
+                                # Determine action type
+                                action = "MOVE"
+                                if "[COPY]" in msg_data:
+                                    action = "COPY"
+                                elif "[DUP]" in msg_data:
+                                    action = "DUPLICATE"
+                                
+                                # Store operation for summary table
+                                self.file_operations.append({
+                                    'action': action,
+                                    'source': source_part,
+                                    'destination': dest_part,
+                                    'filename': Path(source_part).name
+                                })
+                                
+                                # Add to preview
                                 self.add_preview_image(source_part, dest_part, msg_data)
                         except:
                             pass
@@ -652,6 +727,11 @@ class PhotoOrganizerApp:
                         self.progress_var.set(100)
                         self.progress_label.config(text="Complete!")
                         self.log_message("Processing completed successfully!", 'success')
+                        
+                        # Display summary table
+                        if self.file_operations:
+                            self.display_operations_table()
+                        
                         messagebox.showinfo("Complete", "Photo sorting completed successfully!")
                     else:
                         self.progress_label.config(text="Failed")
@@ -694,6 +774,7 @@ class PhotoOrganizerApp:
         for widget in self.preview_content.winfo_children():
             widget.destroy()
         self.preview_images.clear()
+        self.file_operations.clear()  # Clear operations list for new run
     
     def add_preview_image(self, source_path, dest_path, action_text):
         """Add an image to the preview panel."""
@@ -723,11 +804,11 @@ class PhotoOrganizerApp:
                     img_label.pack(side=tk.LEFT, padx=5, pady=5)
                 except Exception as e:
                     # If image can't be loaded, show placeholder
-                    placeholder = ttk.Label(preview_frame, text="📷", font=('Segoe UI', 24))
+                    placeholder = ttk.Label(preview_frame, text="[IMG]", font=('Segoe UI', 10))
                     placeholder.pack(side=tk.LEFT, padx=5, pady=5)
             else:
                 # Show icon for non-image files
-                icon_label = ttk.Label(preview_frame, text="📄", font=('Segoe UI', 24))
+                icon_label = ttk.Label(preview_frame, text="[FILE]", font=('Segoe UI', 10))
                 icon_label.pack(side=tk.LEFT, padx=5, pady=5)
             
             # Add text info
@@ -784,6 +865,82 @@ class PhotoOrganizerApp:
             # Silently fail if preview can't be added
             pass
     
+    def display_operations_table(self):
+        """Display a summary table of all file operations at the end of the log."""
+        try:
+            self.log_message("\n" + "="*80)
+            self.log_message("OPERATIONS SUMMARY")
+            self.log_message("="*80)
+            
+            # Group operations by action type
+            moves = [op for op in self.file_operations if op['action'] == 'MOVE']
+            copies = [op for op in self.file_operations if op['action'] == 'COPY'] 
+            duplicates = [op for op in self.file_operations if op['action'] == 'DUPLICATE']
+            
+            # Display counts
+            total_ops = len(self.file_operations)
+            self.log_message(f"Total operations: {total_ops}")
+            if moves:
+                self.log_message(f"  - Moves: {len(moves)}")
+            if copies:
+                self.log_message(f"  - Copies: {len(copies)}")
+            if duplicates:
+                self.log_message(f"  - Duplicates: {len(duplicates)}")
+            
+            self.log_message("-" * 80)
+            
+            # Create table header
+            header = f"{'Action':<10} {'Filename':<30} {'Label':<15} {'Destination'}"
+            self.log_message(header)
+            self.log_message("-" * 80)
+            
+            # Display each operation
+            for op in self.file_operations:
+                # Extract label from destination path
+                label = self.extract_label_from_path(op['destination'])
+                
+                # Truncate long filenames for better table formatting
+                filename = op['filename']
+                if len(filename) > 28:
+                    filename = filename[:25] + "..."
+                
+                # Truncate destination path for readability
+                dest = op['destination']
+                if len(dest) > 40:
+                    dest = "..." + dest[-37:]
+                
+                row = f"{op['action']:<10} {filename:<30} {label:<15} {dest}"
+                self.log_message(row)
+            
+            self.log_message("=" * 80)
+            
+        except Exception as e:
+            self.log_message(f"Error generating summary table: {e}", 'error')
+    
+    def extract_label_from_path(self, dest_path):
+        """Extract the label from a destination path for the summary table."""
+        try:
+            dest_path_obj = Path(dest_path)
+            dest_base = Path(self.dest_var.get()).name
+            
+            # Find the label by looking at path parts after the destination folder
+            parts = dest_path_obj.parts
+            for i, part in enumerate(parts):
+                if part == dest_base and i + 1 < len(parts):
+                    return parts[i + 1]
+            
+            # Fallback to relative path approach
+            try:
+                rel_path = dest_path_obj.relative_to(self.dest_var.get())
+                if rel_path.parts:
+                    return rel_path.parts[0]
+            except:
+                pass
+                
+            return "unknown"
+        except:
+            return "unknown"
+    
     def log_message(self, message, level='info'):
         """Add message to output log."""
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -815,7 +972,7 @@ Version: 1.0 (Tkinter Edition)
 Uses OpenCLIP for zero-shot image classification
 to automatically organize your photo collection.
 
-© 2024 - Weekend MVP Project"""
+(C) 2024 - Weekend MVP Project"""
         messagebox.showinfo("About Photo Organizer", about_text)
     
     def show_guide(self):

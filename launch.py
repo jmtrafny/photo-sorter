@@ -28,7 +28,7 @@ def main():
     
     # Check if app file exists
     if not os.path.exists(str(app_path)):
-        print(f"\n❌ Error: app_tkinter.py not found!")
+        print(f"\n[ERROR] app_tkinter.py not found!")
         print(f"Expected location: {app_path}")
         input("\nPress Enter to exit...")
         return 1
@@ -52,7 +52,7 @@ def main():
         return 0
         
     except ImportError as e:
-        print(f"\n❌ Error: Missing dependency - {e}")
+        print(f"\n[ERROR] Missing dependency - {e}")
         print("\nPlease install requirements:")
         print("  pip install -r requirements.txt")
         input("\nPress Enter to exit...")
@@ -63,7 +63,7 @@ def main():
         return 0
         
     except Exception as e:
-        print(f"\n❌ Error launching application: {e}")
+        print(f"\n[ERROR] Error launching application: {e}")
         print("\nTroubleshooting:")
         print("1. Ensure all dependencies are installed")
         print("2. Try running directly: python app_tkinter.py")

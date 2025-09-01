@@ -82,26 +82,26 @@ def build_exe():
     PyInstaller.__main__.run(args)
     
     print("\n" + "=" * 60)
-    print("✅ Build completed successfully!")
+    print("[OK] Build completed successfully!")
     print("=" * 60)
     
     # Check output
     exe_path = Path('dist/PhotoOrganizer.exe')
     if exe_path.exists():
         size_mb = exe_path.stat().st_size / (1024 * 1024)
-        print(f"\n📦 Executable created: {exe_path}")
-        print(f"📊 File size: {size_mb:.1f} MB")
-        print("\n🎯 Features:")
-        print("  • Standalone executable - no Python required")
-        print("  • Native Windows GUI with Tkinter")
-        print("  • All ML models included")
-        print("  • Settings saved to user profile")
-        print("\n📝 Notes:")
-        print("  • First run downloads CLIP model (~150MB)")
-        print("  • Model cached for subsequent runs")
-        print("  • Perfect for non-technical users!")
+        print(f"\n[PACKAGE] Executable created: {exe_path}")
+        print(f"[INFO] File size: {size_mb:.1f} MB")
+        print("\n[FEATURES]")
+        print("  - Standalone executable - no Python required")
+        print("  - Native Windows GUI with Tkinter")
+        print("  - All ML models included")
+        print("  - Settings saved to user profile")
+        print("\n[NOTES]")
+        print("  - First run downloads CLIP model (~150MB)")
+        print("  - Model cached for subsequent runs")
+        print("  - Perfect for non-technical users!")
     else:
-        print("\n❌ Error: Executable not found in dist/ folder")
+        print("\n[ERROR] Executable not found in dist/ folder")
         return 1
     
     return 0
@@ -118,7 +118,7 @@ def main():
     missing = [f for f in required_files if not Path(f).exists()]
     
     if missing:
-        print("❌ Error: Missing required files:")
+        print("[ERROR] Missing required files:")
         for f in missing:
             print(f"  - {f}")
         print("\nPlease ensure all files are present before building.")
@@ -127,9 +127,9 @@ def main():
     # Check for PyInstaller
     try:
         import PyInstaller
-        print(f"✅ PyInstaller version: {PyInstaller.__version__}")
+        print(f"[OK] PyInstaller version: {PyInstaller.__version__}")
     except ImportError:
-        print("❌ Error: PyInstaller not found")
+        print("[ERROR] PyInstaller not found")
         print("Install with: pip install pyinstaller")
         return 1
     
@@ -137,7 +137,7 @@ def main():
     result = build_exe()
     
     if result == 0:
-        print("\n🚀 Build successful! You can now distribute PhotoOrganizer.exe")
+        print("\n[SUCCESS] Build successful! You can now distribute PhotoOrganizer.exe")
         print("   Users can simply double-click to run - no installation needed!")
     
     return result
