@@ -8,11 +8,14 @@ numpy>=1.24.0
 Pillow>=10.0.0
 imagehash>=4.3.1
 
-# UI and utilities
-streamlit>=1.32.0
+# Progress bars for CLI
 tqdm>=4.66.0
-websockets>=12.0
+
+# Build tool (for creating exe)
+pyinstaller>=6.0.0
 
 # Optional but recommended for better performance
 # Uncomment if you want GPU support:
 # torch[cuda]
+
+# Note: tkinter is included with Python by default
