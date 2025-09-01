@@ -532,7 +532,7 @@ class PhotoOrganizerApp:
         
         self.clear_preview()
         self.log_message("Running preview...", 'info')
-        self.notebook.select(self.output_tab)
+        # Don't switch tabs immediately - let the preview images appear
         
         # Build and run command
         cmd = self.build_command(dry_run=True)
@@ -628,6 +628,19 @@ class PhotoOrganizerApp:
                             self.progress_label.config(text=f"{current}/{total}")
                         except:
                             pass
+                    
+                    # Parse preview images from dry-run output
+                    if '[MOVE]' in msg_data or '[COPY]' in msg_data or '[DUP]' in msg_data:
+                        try:
+                            # Extract source and destination paths
+                            # Format: [ACTION] source -> destination
+                            parts = msg_data.split(' -> ')
+                            if len(parts) == 2:
+                                source_part = parts[0].split('] ', 1)[1] if '] ' in parts[0] else parts[0]
+                                dest_part = parts[1].strip()
+                                self.add_preview_image(source_part, dest_part, msg_data)
+                        except:
+                            pass
                             
                 elif msg_type == 'complete':
                     self.is_processing = False
@@ -681,6 +694,95 @@ class PhotoOrganizerApp:
         for widget in self.preview_content.winfo_children():
             widget.destroy()
         self.preview_images.clear()
+    
+    def add_preview_image(self, source_path, dest_path, action_text):
+        """Add an image to the preview panel."""
+        try:
+            # Switch to preview tab if not already there
+            if self.notebook.index("current") != 0:
+                self.notebook.select(self.preview_tab)
+            
+            # Create a frame for this image preview
+            preview_frame = ttk.Frame(self.preview_content, relief=tk.RIDGE, borderwidth=1)
+            preview_frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Try to load and display thumbnail
+            img_path = Path(source_path.strip())
+            if img_path.exists() and img_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                try:
+                    # Load image and create thumbnail
+                    img = Image.open(img_path)
+                    img.thumbnail((100, 100), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    
+                    # Keep a reference to prevent garbage collection
+                    self.preview_images.append(photo)
+                    
+                    # Display image
+                    img_label = ttk.Label(preview_frame, image=photo)
+                    img_label.pack(side=tk.LEFT, padx=5, pady=5)
+                except Exception as e:
+                    # If image can't be loaded, show placeholder
+                    placeholder = ttk.Label(preview_frame, text="📷", font=('Segoe UI', 24))
+                    placeholder.pack(side=tk.LEFT, padx=5, pady=5)
+            else:
+                # Show icon for non-image files
+                icon_label = ttk.Label(preview_frame, text="📄", font=('Segoe UI', 24))
+                icon_label.pack(side=tk.LEFT, padx=5, pady=5)
+            
+            # Add text info
+            info_frame = ttk.Frame(preview_frame)
+            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Extract action type from the message
+            action = "MOVE"
+            if "[COPY]" in action_text:
+                action = "COPY"
+            elif "[DUP]" in action_text:
+                action = "DUPLICATE"
+            
+            # Extract label from destination path
+            label = ""
+            if action == "DUPLICATE":
+                label = "duplicates"
+            else:
+                # Parse the destination path to find the label
+                # Structure is: destination_folder/LABEL/[YYYY/MM/]filename
+                dest_path_obj = Path(dest_path)
+                dest_base = Path(self.dest_var.get()).name  # Get just the folder name, not full path
+                
+                # Find the label by looking at path parts after the destination folder
+                parts = dest_path_obj.parts
+                for i, part in enumerate(parts):
+                    if part == dest_base and i + 1 < len(parts):
+                        # The next part after destination folder is the label
+                        label = parts[i + 1]
+                        break
+                
+                # If we couldn't find it by folder name matching, try relative path approach
+                if not label:
+                    try:
+                        # Get relative path from destination to file
+                        rel_path = dest_path_obj.relative_to(self.dest_var.get())
+                        if rel_path.parts:
+                            label = rel_path.parts[0]  # First folder is the label
+                    except:
+                        pass
+            
+            # Show file info
+            ttk.Label(info_frame, text=f"Action: {action}", font=('Segoe UI', 9, 'bold')).pack(anchor=tk.W)
+            if label:
+                ttk.Label(info_frame, text=f"Label: {label}", font=('Segoe UI', 9, 'italic'), foreground='blue').pack(anchor=tk.W)
+            ttk.Label(info_frame, text=f"From: {Path(source_path).name}", font=('Segoe UI', 9)).pack(anchor=tk.W)
+            ttk.Label(info_frame, text=f"To: {dest_path}", font=('Segoe UI', 8), foreground='gray').pack(anchor=tk.W)
+            
+            # Update canvas scroll region
+            self.preview_content.update_idletasks()
+            self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox('all'))
+            
+        except Exception as e:
+            # Silently fail if preview can't be added
+            pass
     
     def log_message(self, message, level='info'):
         """Add message to output log."""
