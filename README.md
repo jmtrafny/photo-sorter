@@ -2,16 +2,32 @@
 
 Local, free-ish (no paid APIs) photo organizer that:
 
-* Generates **content tags** with OpenCLIP (ViT‑B/32) zero‑shot prompts from `labels.json`.
+* Generates **content tags** with OpenCLIP (ViT‑B/32) zero‑shot prompts from built-in labels.
 * Sorts into **category folders** and **Year/Month** subfolders from EXIF.
 * Optional **duplicate detection** (perceptual hash).
-* **Dry‑run** to preview moves.
+* **Preview** to see moves before execution.
+* **Tkinter GUI** for easy drag-and-drop operation.
 
 > Runs on CPU or GPU (CUDA if available). Supported image types: `.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`, `.tiff`, `.gif`. HEIC can be added later.
 
+## Quick Start - GUI Application
+
+**Download and run** the standalone executable:
+
+1. Download `PhotoOrganizer.exe` from releases
+2. Double-click to launch the GUI
+3. Select source and destination folders
+4. Click "Preview" to see where photos will be sorted
+5. Review the preview images and operations table
+6. Click "Run Full Sort" when ready
+
+No Python installation required!
+
 - - -
 
-## Install
+## Developer Installation
+
+If you want to run from source or contribute to development:
 
 ``` bash
 python -m venv .venv
@@ -26,11 +42,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+**Run from source:**
+``` bash
+# GUI version
+python app_tkinter.py
+
+# CLI version  
+python photo_sorter.py --help
+```
+
+**Build executable:**
+``` bash
+python build_exe.py
+```
+
 - - -
 
-## Quick start
+## CLI Usage (Advanced)
 
-**Safe dry‑run** (prints what would happen, no files moved):
+The command-line interface provides more granular control:
+
+**Safe preview** (shows what would happen, no files moved):
 
 ``` powershell
 python photo_sorter.py `
@@ -52,7 +84,7 @@ python photo_sorter.py `
   --dedupe --topk 1 --copy
 ```
 
-Remove `--copy` to actually move files once you’re happy.
+Remove `--copy` to actually move files once you're happy.
 
 - - -
 
@@ -178,7 +210,18 @@ Tips:
 
 ## Safety workflow
 
-1. **Preview a sample** — Run a small **dry‑run** (or use the UI “Preview”) to see where files would go.
+### GUI Workflow (Recommended)
+
+1. **Launch the app** — Double-click `PhotoOrganizer.exe`
+2. **Select folders** — Choose source (unsorted) and destination folders
+3. **Preview** — Click "Preview (Dry Run)" to see where photos will be sorted
+4. **Review** — Check the preview images and operations summary table
+5. **Adjust settings** — Modify labels, thresholds, or other options if needed
+6. **Execute** — Click "Run Full Sort" to perform the actual organization
+
+### CLI Workflow (Advanced)
+
+1. **Preview a sample** — Run a small **dry‑run** to see where files would go.
 2. **Tweak the knobs** — Adjust `--decision` and `--margin`/`--ratio`, and/or edit `labels.json`.
 3. **Repeat 1–2** until the sample looks right (top‑1 categories make sense and `_unsorted` rate is acceptable).
 4. **Full pass (choose one)**

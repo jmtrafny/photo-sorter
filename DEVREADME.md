@@ -8,10 +8,12 @@ Photo Organizer is an AI-powered tool for automatically sorting photos using zer
 
 * **Zero-shot classification**: No training required, works on any photo collection
 * **Local processing**: No cloud APIs, all computation happens on your machine
-* **Multiple interfaces**: Both CLI and web UI available
+* **Native GUI**: Tkinter-based desktop application with preview functionality
+* **CLI interface**: Command-line tool for advanced users and automation
 * **Flexible organization**: Category-based or date-based folder structures
 * **Duplicate detection**: Perceptual hashing to identify near-duplicates
 * **Built-in labels**: Works out-of-the-box with sensible defaults
+* **Standalone executable**: Single-file distribution requires no Python installation
 
 ## Architecture
 
@@ -21,13 +23,13 @@ Photo Organizer is an AI-powered tool for automatically sorting photos using zer
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   User Input    │     │  CLIP Model     │     │   File System   │
 │                 │     │                 │     │                 │
-│ CLI/Streamlit   │───▶│ Image Encoder   │───▶│  Sorted Photos   │
-│ UI              │     │ Text Encoder    │     │                 │
+│ Tkinter GUI     │───▶│ Image Encoder   │───▶│  Sorted Photos   │
+│ CLI Interface   │     │ Text Encoder    │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
          │                       │
          │               ┌──────────────────┐
-         └─────────────▶│ Label Config     │
-                         │ (built-in/custom)│
+         └─────────────▶│ Built-in Labels  │
+                         │ (default_labels) │
                          └──────────────────┘
 ```
 
@@ -35,17 +37,18 @@ Photo Organizer is an AI-powered tool for automatically sorting photos using zer
 
 ```
 photo-organizer/
-├── photo_sorter.py      # CLI implementation (for developers)
-├── app_streamlit.py     # Web UI core application
-├── launch_ui.py        # EXE entry point
+├── photo_sorter.py      # CLI implementation and core logic
+├── app_tkinter.py       # Tkinter GUI application
+├── launch.py           # Optional launcher script
 ├── default_labels.py    # Built-in label configurations
-├── build_exe.py        # Single EXE build script
+├── build_exe.py        # PyInstaller build script
 ├── create_release.py    # Distribution package creator
 ├── undo.py             # Undo functionality
 ├── requirements.txt     # Python dependencies
 ├── README.md           # User documentation
 ├── DEVREADME.md        # This file
-└── labels.json         # Example custom labels
+├── labels.json         # Example custom labels
+└── PhotoOrganizer.spec  # PyInstaller specification
 ```
 
 ## Core Technologies
@@ -74,30 +77,32 @@ photo-organizer/
 * [CLIP Paper](https://arxiv.org/abs/2103.00020)
 * [Hugging Face OpenCLIP](https://huggingface.co/docs/transformers/model_doc/clip)
 
-### 2\. Streamlit \(Web UI\)
+### 2\. Tkinter \(Native GUI\)
 
-**What it is**: Python framework for building data apps with minimal frontend code.
+**What it is**: Python's standard GUI toolkit, included with most Python installations.
 
 **Why chosen**:
 
-* Rapid prototyping for ML applications
-* Built-in caching for expensive operations (model loading)
-* Real-time parameter tuning with widgets
-* Easy deployment
+* No additional dependencies for basic GUI functionality
+* Native look and feel on each platform
+* Mature and stable
+* Perfect for desktop applications requiring file operations
+* Lightweight and fast startup
 
 **Key features used**:
 
-* `@st.cache_resource`: Cache model loading
-* `@st.cache_data`: Cache file scanning
-* Sidebar widgets for parameters
-* Real-time subprocess output streaming
+* `tkinter.filedialog`: Native folder/file picker
+* `Canvas` with `Scrollbar`: Scrollable image preview
+* `Text` widget: Live output streaming
+* `PIL.ImageTk`: Display images in Tkinter
+* `threading`: Non-blocking processing operations
 
-**Key files**: `app_streamlit.py`
+**Key files**: `app_tkinter.py`, `launch.py`
 
 **Resources**:
 
-* [Streamlit Documentation](https://docs.streamlit.io/)
-* [Streamlit Gallery](https://streamlit.io/gallery)
+* [Tkinter Documentation](https://docs.python.org/3/library/tkinter.html)
+* [Real Python Tkinter Guide](https://realpython.com/python-gui-tkinter/)
 
 ### 3\. PIL/Pillow \(Image Processing\)
 
@@ -156,26 +161,30 @@ photo-organizer/
     * Apply decision policy
     * Move/copy to appropriate folder
 
-### app\_streamlit.py (Web UI)
+### app\_tkinter.py (GUI Application)
 
 **Main functions**:
 
-* `get_model_and_text_features()`: Cached model/embeddings loading
-* `pick_directory()`: Native folder picker integration
-* `build_cli_command()`: Translate UI settings to CLI args
-* `run_cli()`: Execute CLI subprocess with real-time output
+* `PhotoOrganizerApp.__init__()`: Main application setup and widget creation
+* `select_folder()`: Native folder picker integration
+* `run_preview()` / `run_full_sort()`: Execute operations in separate threads
+* `add_preview_image()`: Display image thumbnails with labels
+* `display_operations_table()`: Show summary of planned operations
+* `log_message()`: Thread-safe output logging
 
 **UI Architecture**:
 
-* Sidebar: Configuration and controls
-* Main area: Preview and results
-* WebSocket: Browser connection monitoring for auto-shutdown
+* Left panel: Folder selection and controls
+* Right panel: Configuration options (labels, settings)
+* Bottom section: Scrollable image preview with operation details
+* Text area: Live processing output and operations summary table
 
-**Caching strategy**:
+**Threading strategy**:
 
-* Model loading: Cached by label config and parameters
-* File scanning: Cached by directory path
-* Text encoding: Part of model cache
+* GUI runs on main thread
+* Processing operations run on worker threads
+* Queue-based communication for thread-safe UI updates
+* Proper handling of subprocess vs direct function calls for bundled execution
 
 ### default\_labels.py
 
@@ -323,14 +332,14 @@ python build_exe.py
 
 #### Manual PyInstaller Command (if needed)
 ```bash
-pyinstaller --name=PhotoOrganizer --onefile --windowed --add-data=default_labels.py;. --add-data=app_streamlit.py;. --hidden-import=streamlit --hidden-import=open_clip --hidden-import=torch --hidden-import=PIL --hidden-import=websockets --collect-all=streamlit --collect-all=open_clip --collect-all=torch launch_ui.py
+pyinstaller --name=PhotoOrganizer --onefile --windowed --add-data=default_labels.py;. --add-data=photo_sorter.py;. --hidden-import=PIL --hidden-import=PIL.Image --hidden-import=PIL.ImageTk --hidden-import=open_clip --hidden-import=torch --hidden-import=torchvision --hidden-import=numpy --hidden-import=imagehash --hidden-import=tqdm --collect-all=open_clip --collect-all=torch --collect-all=PIL app_tkinter.py
 ```
 
 ### Output Structure
 After building, you'll have:
 ```
 dist/
-├── PhotoOrganizer.exe        # Single double-click application (~500MB)
+├── PhotoOrganizer.exe        # Single double-click application (~350MB)
 └── [build artifacts]
 ```
 
@@ -347,11 +356,12 @@ copy labels.json PhotoOrganizer-Release\example-labels.json
 ```
 
 ### Key Considerations
-* **Size**: ~500MB per executable due to PyTorch/CLIP
+* **Size**: ~350MB per executable due to PyTorch/CLIP
 * **First Run**: Requires internet for model download (~150MB)  
 * **Memory**: 4GB+ RAM recommended for large collections
 * **GPU**: CUDA support adds significant size if included
 * **Compatibility**: Windows 10+ (can build for other platforms)
+* **Threading**: GUI operations are non-blocking with proper thread management
 
 ### Dependencies
 
@@ -360,17 +370,20 @@ copy labels.json PhotoOrganizer-Release\example-labels.json
 ```
 torch>=1.13.0
 open-clip-torch>=2.20.0
-streamlit>=1.28.0
 pillow>=9.0.0
 imagehash>=4.3.0
 tqdm>=4.64.0
-websockets>=12.0
+numpy
 ```
 
 **Optional**:
 
 * tkinter (usually bundled with Python)
 * CUDA libraries (for GPU acceleration)
+
+**Development only**:
+
+* pyinstaller (for building executables)
 
 ## Testing Strategy
 
@@ -383,12 +396,13 @@ websockets>=12.0
 * [ ] Custom vs built-in labels
 * [ ] Error conditions (missing files, invalid JSON)
 
-**UI testing**:
+**GUI testing**:
 
-* [ ] Folder picker functionality
-* [ ] Preview accuracy
-* [ ] Parameter changes reflected in CLI command
-* [ ] Auto-shutdown behavior
+* [ ] Folder picker functionality (native dialogs)
+* [ ] Preview image display and thumbnail generation
+* [ ] Operations summary table accuracy
+* [ ] Thread safety (non-blocking UI during processing)
+* [ ] Proper handling of bundled vs source execution
 
 **Cross-platform**:
 
@@ -431,7 +445,7 @@ websockets>=12.0
 
 **File access**: Application needs read access to source images and write access to destination.
 
-**Network**: Streamlit UI binds to localhost by default (secure).
+**Network**: Tkinter GUI runs locally with no network binding required.
 
 **Privacy**: All processing is local, no data sent to external services.
 
@@ -559,5 +573,32 @@ Replace CLIP model in `get_model_and_text_features()`:
 
 - - -
 
-**Last Updated**: 2025-08-30
+**Last Updated**: 2025-08-31
 **Maintainer**: James M. Trafny
+
+---
+
+## Recent Architecture Changes (2025-08-31)
+
+### Migration from Streamlit to Tkinter
+
+**Why the change?**
+* **Native desktop experience**: Better suited for file management operations
+* **No web dependencies**: Eliminates need for browser and web server
+* **Simpler deployment**: Single executable with native dialogs
+* **Better performance**: Direct Python GUI without web overhead
+* **User preference**: Desktop app feel over web interface
+
+**Key improvements implemented:**
+* **Image preview system**: Thumbnail generation with PIL.ImageTk
+* **Operations summary table**: Formatted table showing planned actions
+* **Thread-safe processing**: Non-blocking GUI with proper queue communication
+* **Bundled execution support**: Proper handling of PyInstaller bundled vs source execution
+* **Unicode compatibility**: Removed all Unicode characters for Windows console compatibility
+
+**Migration challenges resolved:**
+* **Subprocess vs direct calls**: Fixed second app instance issue in bundled execution
+* **Thread safety**: Implemented proper GUI updates from worker threads  
+* **Image display**: Replaced Streamlit image widgets with Tkinter Canvas and PIL
+* **File dialogs**: Replaced custom folder picker with native tkinter.filedialog
+* **Output streaming**: Replaced Streamlit real-time updates with threaded text widget updates
