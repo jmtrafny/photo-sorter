@@ -28,9 +28,11 @@ import argparse
 import json
 import shutil
 import warnings
+import time
+import concurrent.futures
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple, Iterable
+from typing import Dict, List, Tuple, Iterable, Optional
 
 from PIL import Image, ExifTags
 import imagehash
@@ -38,7 +40,8 @@ import torch
 import open_clip
 from tqdm import tqdm
 
-from default_labels import DEFAULT_LABELS
+from default_labels import DEFAULT_LABELS, get_labels_for_tier
+from model_manager import ModelManager, get_model_manager
 
 # Silence the benign open_clip warning about QuickGELU
 # This warning occurs because OpenAI's CLIP was trained with QuickGELU activation
@@ -89,7 +92,7 @@ def validate_labels(data: Dict[str, Dict]) -> Tuple[bool, str]:
     return True, ""
 
 
-def load_labels(labels_path: Path | None = None, use_builtin: bool = True) -> Dict[str, Dict]:
+def load_labels(labels_path: Path | None = None, use_builtin: bool = True, label_tier: str = "small") -> Dict[str, Dict]:
     """Load labels configuration with validation and fallback to built-in defaults.
     
     This function handles the loading of label configurations for image classification.
@@ -140,7 +143,8 @@ def load_labels(labels_path: Path | None = None, use_builtin: bool = True) -> Di
     # Use built-in labels if no custom file or if it failed
     if data is None:
         if use_builtin:
-            data = DEFAULT_LABELS.copy()
+            # Use tiered labels based on model size
+            data = get_labels_for_tier(label_tier)
         else:
             raise FileNotFoundError(f"Labels file not found: {labels_path}")
     
@@ -241,6 +245,45 @@ def load_image(path: Path, device: str, preprocess):
     return img_t
 
 
+def load_images_batch(paths: List[Path], device: str, preprocess, max_workers: int = 4):
+    """Load and preprocess multiple images in parallel.
+    
+    Args:
+        paths: List of paths to image files
+        device: Target device ('cuda' or 'cpu')
+        preprocess: CLIP's preprocessing transform
+        max_workers: Number of parallel workers for loading
+        
+    Returns:
+        Tensor of shape (N, 3, 224, 224) ready for CLIP encoding
+    """
+    def load_single(path):
+        try:
+            img = Image.open(path).convert("RGB")
+            return preprocess(img), path
+        except Exception:
+            return None, path
+    
+    # Load images in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(load_single, paths))
+    
+    # Filter out failed loads and stack successful ones
+    valid_tensors = []
+    valid_paths = []
+    for tensor, path in results:
+        if tensor is not None:
+            valid_tensors.append(tensor)
+            valid_paths.append(path)
+    
+    if valid_tensors:
+        # Stack into batch tensor
+        batch = torch.stack(valid_tensors).to(device)
+        return batch, valid_paths
+    else:
+        return None, []
+
+
 def score_labels(model, image_t, text_features, owners, *, agg: str = "max", temperature: float = 1.0):
     """Compute label scores by comparing image to all text prompts.
     
@@ -294,6 +337,61 @@ def score_labels(model, image_t, text_features, owners, *, agg: str = "max", tem
     if total > 0:
         scores = {k: v / total for k, v in scores.items()}
     return scores, probs
+
+
+def score_labels_batch(model, images_batch, text_features, owners, *, agg: str = "max", temperature: float = 1.0):
+    """Compute label scores for a batch of images.
+    
+    Process multiple images at once for better GPU utilization.
+    
+    Args:
+        model: CLIP model with encode_image capability  
+        images_batch: Batch tensor of shape (N, 3, 224, 224)
+        text_features: Text embeddings from build_text_tokens()
+        owners: Mapping of prompts to labels
+        agg: Aggregation strategy ('max', 'mean', 'sum')
+        temperature: Softmax temperature
+        
+    Returns:
+        List of (scores_dict, probs_tensor) tuples, one per image
+    """
+    with torch.no_grad():
+        # Encode all images at once
+        image_features = model.encode_image(images_batch)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+        
+        # Compute similarities for all images
+        logits = (image_features @ text_features.T) / temperature
+        all_probs = logits.softmax(dim=-1)
+    
+    # Process each image's scores
+    results = []
+    for probs in all_probs:
+        # Gather per-label values
+        per_label_vals: Dict[str, List[float]] = {}
+        for idx, p in enumerate(probs):
+            label, weight, _syn = owners[idx]
+            per_label_vals.setdefault(label, []).append(float(p) * float(weight))
+        
+        scores: Dict[str, float] = {}
+        for label, vals in per_label_vals.items():
+            if not vals:
+                scores[label] = 0.0
+            elif agg == "sum":
+                scores[label] = sum(vals)
+            elif agg == "mean":
+                scores[label] = sum(vals) / len(vals)
+            else:  # "max"
+                scores[label] = max(vals)
+        
+        # Normalize to sum=1
+        total = sum(scores.values())
+        if total > 0:
+            scores = {k: v / total for k, v in scores.items()}
+        
+        results.append((scores, probs))
+    
+    return results
 
 
 def get_exif_datetime(path: Path) -> Tuple[int, int]:
@@ -444,6 +542,96 @@ def compute_phash(path: Path):
 # Main
 # ----------------------------
 
+def process_single_result(f: Path, scores: Dict, probs, args, dst: Path, duplicate_dir: Path):
+    """Process classification results for a single image.
+    
+    Helper function to handle the decision logic and file operations
+    after an image has been classified.
+    
+    Args:
+        f: Path to the image file
+        scores: Label scores dictionary
+        probs: Raw probability tensor
+        args: Command line arguments
+        dst: Destination directory
+        duplicate_dir: Directory for duplicates
+    """
+    # Debug prints
+    if args.debug_scores and scores:
+        sorted_scores = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        print(f"[DBG] {f.name} top{args.debug_topk}:", [(k, round(v, 4)) for k, v in sorted_scores[:args.debug_topk]])
+    
+    # Decision Logic - determine which category(ies) to sort into
+    sorted_scores = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    chosen: List[str] = []
+    
+    if sorted_scores:
+        (top_label, top_score) = sorted_scores[0]
+        second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
+
+        # Apply decision policy
+        accept = False
+        if args.decision == "threshold":
+            accept = top_score >= args.threshold
+        elif args.decision == "margin":
+            accept = (top_score - second_score) >= args.margin
+        elif args.decision == "ratio":
+            denom = max(second_score, 1e-9)
+            accept = (top_score / denom) >= args.ratio
+        elif args.decision == "always-top1":
+            accept = True
+
+        if accept:
+            chosen = [top_label] if args.topk == 1 else [l for l, _ in sorted_scores[: args.topk]]
+        else:
+            # Soft fallback
+            if top_score >= (args.threshold * 0.6):
+                chosen = [top_label]
+    
+    if not chosen:
+        chosen = ["_unsorted"]
+    
+    # Determine folder structure
+    if args.date_folders:
+        year, month = get_exif_datetime(f)
+        ydir = f"{year:04d}/{month:02d}"
+    else:
+        ydir = ""
+    
+    # Move or copy the file
+    for label in chosen:
+        if ydir:
+            out_dir = dst / label / ydir
+        else:
+            out_dir = dst / label
+        target = out_dir / f.name
+        
+        try:
+            if args.copy and len(chosen) > 1:
+                if args.dry_run:
+                    print(f"[COPY] {f} -> {target}")
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    safe_copy(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
+            else:
+                if args.copy:
+                    if args.dry_run:
+                        print(f"[COPY] {f} -> {target}")
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        safe_copy(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
+                else:
+                    if args.dry_run:
+                        print(f"[MOVE] {f} -> {target}")
+                    else:
+                        safe_move(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
+                break
+        except FileExistsError as e:
+            print(f"[ERROR] {e}")
+            if args.no_overwrite:
+                print("Stopping due to --no-overwrite flag.")
+                raise
+
 def main():
     """Main CLI entry point for photo sorting application.
     
@@ -474,6 +662,10 @@ def main():
     ap.add_argument("--skip-existing", action="store_true", help="Skip files if destination already exists (useful for incremental runs)")
     ap.add_argument("--no-overwrite", action="store_true", help="Error if destination exists instead of auto-renaming (safety guard)")
     ap.add_argument("--date-folders", action="store_true", help="Organize photos into YYYY/MM subfolders based on EXIF or file date")
+    ap.add_argument("--model-size", choices=["small", "medium", "large", "xlarge"], default="small", help="Model size: small (fast), medium (balanced), large (accurate), xlarge (max accuracy)")
+    ap.add_argument("--label-tier", choices=["small", "medium", "large"], default=None, help="Label tier: small (8 labels), medium (16 labels), large (40+ labels). If not specified, uses tier based on model size.")
+    ap.add_argument("--batch-size", type=int, default=None, help="Batch size for processing (auto-detect if not specified)")
+    ap.add_argument("--parallel-load", type=int, default=4, help="Number of parallel workers for image loading")
     args = ap.parse_args()
 
     src = Path(args.src).expanduser().resolve()
@@ -488,29 +680,57 @@ def main():
     else:
         print("Using built-in labels")
     
-    labels_cfg = load_labels(labels_path, use_builtin=True)
+    # Determine label tier (explicit tier overrides model-based tier)
+    if args.label_tier:
+        label_tier = args.label_tier
+    else:
+        # Default: map model size to label tier
+        label_tier = "small" if args.model_size == "small" else "medium" if args.model_size == "medium" else "large"
+    
+    labels_cfg = load_labels(labels_path, use_builtin=True, label_tier=label_tier)
 
-    # Initialize CLIP model for zero-shot classification
-    # Using OpenAI's pretrained ViT-B/32 model (good balance of speed/accuracy)
+    # Initialize model manager and load selected model
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model_name = "ViT-B-32"  # Vision Transformer with 32x32 patch size
-    pretrained = "openai"    # Use OpenAI's original CLIP weights
+    model_manager = get_model_manager()
     
-    print(f"Loading CLIP model on device: {device}")
-    print("This may take a moment on first run (downloading ~150MB model)...")
+    # Get model info and estimate processing time
+    model_info = model_manager.get_model_info(args.model_size)
+    print(f"Model: {args.model_size.upper()} ({model_info['description']})")
+    print(f"Expected accuracy: {model_info['accuracy']} | Speed: {model_info['speed']}")
     
+    # Count images first for time estimation
+    print(f"Scanning for images in: {src}")
+    files = [p for p in src.rglob("*") if p.is_file() and is_image_file(p)]
+    if not files:
+        print("No images found.")
+        return
+    
+    # Estimate and display processing time
+    estimated_time = model_manager.estimate_processing_time(
+        len(files), args.model_size, use_gpu=(device == "cuda")
+    )
+    print(f"Estimated processing time: {estimated_time:.1f} seconds ({estimated_time/60:.1f} minutes)")
+    
+    # Load the model with progress callback
+    def progress_callback(msg):
+        print(f"[MODEL] {msg}")
+    
+    print(f"Loading {args.model_size} model on {device}...")
     try:
-        model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained)
-        tokenizer = open_clip.get_tokenizer(model_name)
-        model = model.to(device).eval()  # Set to evaluation mode
+        model, preprocess, tokenizer = model_manager.load_model(
+            args.model_size, device, progress_callback
+        )
         print("[OK] Model loaded successfully")
     except Exception as e:
         print(f"[ERROR] Failed to load CLIP model: {e}")
-        print("This could be due to:")
-        print("  - Internet connection required for first-time model download")
-        print("  - Insufficient memory (need ~4GB RAM minimum)")
-        print("  - CUDA/GPU driver issues (try CPU mode)")
         return
+    
+    # Determine optimal batch size
+    if args.batch_size:
+        batch_size = args.batch_size
+    else:
+        batch_size = model_manager.get_optimal_batch_size(args.model_size)
+    print(f"Batch size: {batch_size}")
 
     # Pre-encode all text prompts for efficient comparison
     # This is done once upfront rather than per-image
@@ -521,12 +741,8 @@ def main():
     seen_hashes = set()  # Store perceptual hashes of processed images
     duplicate_dir = dst / "_duplicates"  # Where duplicates will be moved
 
-    # Find all supported image files recursively
-    print(f"Scanning for images in: {src}")
-    files = [p for p in src.rglob("*") if p.is_file() and is_image_file(p)]
-    if not files:
-        print("No images found.")
-        return
+    # Set up parallel processing threads
+    torch.set_num_threads(min(8, torch.get_num_threads()))
 
     action = "COPY" if args.copy else "MOVE"
     print(f"Device: {device} | Label count: {len(labels_cfg)} | Prompts: {len(prompts)} | Agg: {args.agg}")
@@ -541,119 +757,97 @@ def main():
         print(f"[WARNING] Large collection detected ({len(files)} files). Consider processing in smaller batches.")
         print("          This may take significant time and memory. Press Ctrl+C to cancel if needed.")
 
-    # Process each image file
-    for f in tqdm(files, desc="Processing images"):
-        # Step 1: Check for duplicates first (before expensive classification)
-        if args.dedupe:
-            ah = compute_phash(f)
-            if ah is not None:
-                if ah in seen_hashes:
-                    target = duplicate_dir / f.name
-                    if args.dry_run:
-                        print(f"[DUP] {f} -> {target}")
+    # Process images in batches for better performance
+    process_batch = batch_size > 1 and not args.debug_scores
+    
+    if process_batch:
+        # Batch processing mode
+        print(f"Processing {len(files)} images in batches of {batch_size}...")
+        for i in tqdm(range(0, len(files), batch_size), desc="Processing batches"):
+            batch_files = files[i:i+batch_size]
+            
+            # Filter duplicates if enabled
+            if args.dedupe:
+                non_dup_files = []
+                for f in batch_files:
+                    ah = compute_phash(f)
+                    if ah is not None:
+                        if ah in seen_hashes:
+                            target = duplicate_dir / f.name
+                            if args.dry_run:
+                                print(f"[DUP] {f} -> {target}")
+                            else:
+                                target.parent.mkdir(parents=True, exist_ok=True)
+                                safe_move(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
+                        else:
+                            seen_hashes.add(ah)
+                            non_dup_files.append(f)
                     else:
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        safe_move(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
-                    continue
-                seen_hashes.add(ah)
-
-        # Step 2: AI Classification - determine what's in the image
-        try:
-            # Load and preprocess image for CLIP
-            image_t = load_image(f, device, preprocess)
-            # Compare image to all text prompts and get scores per label
-            scores, probs = score_labels(model, image_t, text_features, owners, agg=args.agg)
-        except Exception as e:
-            # If image processing fails (corrupted, unsupported format, etc.)
-            print(f"[WARN] Failed model inference on {f}: {e}")
-            scores = {}
-            probs = []
-
-        # Debug prints
-        if args.debug_scores and scores:
-            sorted_scores = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-            print(f"[DBG] {f.name} top{args.debug_topk}:", [(k, round(v, 4)) for k, v in sorted_scores[:args.debug_topk]])
-            if args.debug_prompts and len(probs) > 0:
-                # show top prompt hits with (label/synonym)
-                top_pairs = sorted([(float(probs[i]), owners[i][0], owners[i][2], prompts[i]) for i in range(len(prompts))], reverse=True)[:args.debug_topk]
-                print("       prompts:", [(round(p, 4), lab, syn) for p, lab, syn, _ in top_pairs])
-
-        # Step 3: Decision Logic - determine which category(ies) to sort into
-        sorted_scores = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-        chosen: List[str] = []
-        
-        if sorted_scores:
-            (top_label, top_score) = sorted_scores[0]
-            second_score = sorted_scores[1][1] if len(sorted_scores) > 1 else 0.0
-
-            # Apply decision policy to determine if we're confident enough
-            accept = False
-            if args.decision == "threshold":
-                # Accept if top score exceeds minimum confidence
-                accept = top_score >= args.threshold
-            elif args.decision == "margin":
-                # Accept if top score is significantly higher than second
-                accept = (top_score - second_score) >= args.margin
-            elif args.decision == "ratio":
-                # Accept if top score is proportionally higher than second
-                denom = max(second_score, 1e-9)  # Avoid division by zero
-                accept = (top_score / denom) >= args.ratio
-            elif args.decision == "always-top1":
-                # Always accept the highest scoring label
-                accept = True
-
-            if accept:
-                # Take top-1 or top-K labels based on user preference
-                chosen = [top_label] if args.topk == 1 else [l for l, _ in sorted_scores[: args.topk]]
-            else:
-                # Soft fallback: if somewhat confident, still take top-1
-                if top_score >= (args.threshold * 0.6):
-                    chosen = [top_label]
-
-        # If no labels were chosen, put in unsorted category
-        if not chosen:
-            chosen = ["_unsorted"]
-
-        # Step 4: Determine folder structure (flat or date-based)
-        if args.date_folders:
-            year, month = get_exif_datetime(f)
-            ydir = f"{year:04d}/{month:02d}"  # e.g., "2023/12"
-        else:
-            ydir = ""  # Flat structure under category folder
-
-        # Step 5: Actually move or copy the file to its destination(s)
-        for label in chosen:
-            if ydir:
-                out_dir = dst / label / ydir
-            else:
-                out_dir = dst / label
-            target = out_dir / f.name
+                        non_dup_files.append(f)
+                batch_files = non_dup_files
+            
+            if not batch_files:
+                continue
+            
+            # Load batch of images in parallel
             try:
-                if args.copy and len(chosen) > 1:
-                    if args.dry_run:
-                        print(f"[COPY] {f} -> {target}")
-                    else:
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        safe_copy(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
-                else:
-                    if args.copy:
+                batch_tensor, valid_paths = load_images_batch(
+                    batch_files, device, preprocess, max_workers=args.parallel_load
+                )
+                
+                if batch_tensor is None:
+                    continue
+                
+                # Score all images in batch
+                batch_results = score_labels_batch(
+                    model, batch_tensor, text_features, owners, agg=args.agg
+                )
+                
+                # Process results for each image
+                for (scores, probs), f in zip(batch_results, valid_paths):
+                    process_single_result(f, scores, probs, args, dst, duplicate_dir)
+                    
+            except Exception as e:
+                print(f"[WARN] Failed batch processing: {e}")
+                # Fall back to individual processing for this batch
+                for f in batch_files:
+                    try:
+                        image_t = load_image(f, device, preprocess)
+                        scores, probs = score_labels(model, image_t, text_features, owners, agg=args.agg)
+                        process_single_result(f, scores, probs, args, dst, duplicate_dir)
+                    except Exception as e2:
+                        print(f"[WARN] Failed processing {f}: {e2}")
+    else:
+        # Original single-image processing mode (for debugging or small batches)
+        for f in tqdm(files, desc="Processing images"):
+            # Step 1: Check for duplicates first (before expensive classification)
+            if args.dedupe:
+                ah = compute_phash(f)
+                if ah is not None:
+                    if ah in seen_hashes:
+                        target = duplicate_dir / f.name
                         if args.dry_run:
-                            print(f"[COPY] {f} -> {target}")
+                            print(f"[DUP] {f} -> {target}")
                         else:
                             target.parent.mkdir(parents=True, exist_ok=True)
-                            safe_copy(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
-                    else:
-                        if args.dry_run:
-                            print(f"[MOVE] {f} -> {target}")
-                        else:
                             safe_move(f, target, dry_run=False, skip_existing=args.skip_existing, no_overwrite=args.no_overwrite)
-                    break
-            except FileExistsError as e:
-                print(f"[ERROR] {e}")
-                if args.no_overwrite:
-                    print("Stopping due to --no-overwrite flag.")
-                    return
-                break
+                        continue
+                    seen_hashes.add(ah)
+
+            # Step 2: AI Classification - determine what's in the image
+            try:
+                # Load and preprocess image for CLIP
+                image_t = load_image(f, device, preprocess)
+                # Compare image to all text prompts and get scores per label
+                scores, probs = score_labels(model, image_t, text_features, owners, agg=args.agg)
+            except Exception as e:
+                # If image processing fails (corrupted, unsupported format, etc.)
+                print(f"[WARN] Failed model inference on {f}: {e}")
+                scores = {}
+                probs = []
+
+            # Process the single result using helper function
+            process_single_result(f, scores, probs, args, dst, duplicate_dir)
 
 
 if __name__ == "__main__":
