@@ -24,7 +24,8 @@ try:
     from PIL import Image, ImageTk
     import torch
     import open_clip
-    from default_labels import DEFAULT_LABELS
+    from default_labels import DEFAULT_LABELS, get_label_stats
+    from model_manager import get_model_manager
 except ImportError as e:
     print(f"Missing dependency: {e}")
     print("Please install requirements: pip install -r requirements.txt")
@@ -53,6 +54,7 @@ class PhotoOrganizerApp:
         self.process_queue = queue.Queue()
         self.is_processing = False
         self.file_operations = []  # Track all file operations for summary table
+        self.model_manager = get_model_manager()  # Initialize model manager
         
         # Setup UI
         self.setup_styles()
@@ -157,74 +159,114 @@ class PhotoOrganizerApp:
         
         folders_frame.columnconfigure(1, weight=1)
         
-        # Classification Section
-        class_frame = ttk.LabelFrame(settings_frame, text="Classification", padding="10", style='Section.TLabelframe')
+        # Model & Classification Section
+        class_frame = ttk.LabelFrame(settings_frame, text="Model & Classification", padding="10", style='Section.TLabelframe')
         class_frame.grid(row=current_row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         current_row += 1
         
-        # Labels configuration
-        self.use_custom_labels = tk.BooleanVar(value=self.settings.get('use_custom_labels', False))
-        ttk.Checkbutton(class_frame, text="Use custom labels file", 
-                       variable=self.use_custom_labels,
-                       command=self.toggle_custom_labels).grid(row=0, column=0, columnspan=2, sticky=tk.W)
+        # Model size selection
+        ttk.Label(class_frame, text="Model:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.model_size_var = tk.StringVar(value=self.settings.get('model_size', 'small'))
+        self.model_combo = ttk.Combobox(class_frame, textvariable=self.model_size_var,
+                                       values=['small', 'medium', 'large', 'xlarge'],
+                                       state='readonly', width=23)
+        self.model_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=2)
+        self.model_combo.bind('<<ComboboxSelected>>', self.on_model_change)
         
-        ttk.Label(class_frame, text="Labels file:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        # Model info display
+        self.model_info_label = ttk.Label(class_frame, text="", font=('Segoe UI', 8, 'italic'))
+        self.model_info_label.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=2)
+        self.update_model_info()
+        
+        # Labels configuration with radio buttons
+        ttk.Label(class_frame, text="Labels:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        
+        # Create radio button frame
+        labels_frame = ttk.Frame(class_frame)
+        labels_frame.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=2)
+        
+        self.label_source_var = tk.StringVar(value=self.settings.get('label_source', 'small'))
+        
+        # Radio buttons for label tiers
+        ttk.Radiobutton(labels_frame, text="Small (8 labels)", 
+                       variable=self.label_source_var, value="small",
+                       command=self.on_label_source_change).grid(row=0, column=0, sticky=tk.W, padx=2)
+        
+        ttk.Radiobutton(labels_frame, text="Medium (16 labels)", 
+                       variable=self.label_source_var, value="medium",
+                       command=self.on_label_source_change).grid(row=0, column=1, sticky=tk.W, padx=2)
+        
+        ttk.Radiobutton(labels_frame, text="Large (40+ labels)", 
+                       variable=self.label_source_var, value="large",
+                       command=self.on_label_source_change).grid(row=1, column=0, sticky=tk.W, padx=2)
+        
+        ttk.Radiobutton(labels_frame, text="Custom file", 
+                       variable=self.label_source_var, value="custom",
+                       command=self.on_label_source_change).grid(row=1, column=1, sticky=tk.W, padx=2)
+        
+        # Custom labels file entry (initially disabled)
+        ttk.Label(class_frame, text="Custom file:").grid(row=3, column=0, sticky=tk.W, pady=2)
         self.labels_var = tk.StringVar(value=self.settings.get('labels_file', 'labels.json'))
         self.labels_entry = ttk.Entry(class_frame, textvariable=self.labels_var, width=25, state='disabled')
-        self.labels_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=2)
+        self.labels_entry.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=2)
         
-        # Decision strategy
-        ttk.Label(class_frame, text="Decision:").grid(row=2, column=0, sticky=tk.W, pady=2)
-        self.decision_var = tk.StringVar(value=self.settings.get('decision', 'margin'))
-        decision_combo = ttk.Combobox(class_frame, textvariable=self.decision_var, 
-                                     values=['margin', 'ratio', 'threshold', 'always-top1'],
-                                     state='readonly', width=23)
-        decision_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=2)
-        
-        # Aggregation
-        ttk.Label(class_frame, text="Aggregation:").grid(row=3, column=0, sticky=tk.W, pady=2)
-        self.agg_var = tk.StringVar(value=self.settings.get('aggregation', 'max'))
-        agg_combo = ttk.Combobox(class_frame, textvariable=self.agg_var,
-                                values=['max', 'mean', 'sum'],
-                                state='readonly', width=23)
-        agg_combo.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=2)
+        # Label info display
+        self.label_info_label = ttk.Label(class_frame, text="", font=('Segoe UI', 8, 'italic'))
+        self.label_info_label.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=2)
+        self.update_label_info()
         
         class_frame.columnconfigure(1, weight=1)
         
-        # Thresholds Section
-        thresh_frame = ttk.LabelFrame(settings_frame, text="Thresholds", padding="10", style='Section.TLabelframe')
+        # Decision & Thresholds Section
+        thresh_frame = ttk.LabelFrame(settings_frame, text="Decision & Thresholds", padding="10", style='Section.TLabelframe')
         thresh_frame.grid(row=current_row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         current_row += 1
         
+        # Decision strategy
+        ttk.Label(thresh_frame, text="Decision:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.decision_var = tk.StringVar(value=self.settings.get('decision', 'margin'))
+        decision_combo = ttk.Combobox(thresh_frame, textvariable=self.decision_var, 
+                                     values=['margin', 'ratio', 'threshold', 'always-top1'],
+                                     state='readonly', width=23)
+        decision_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=2)
+        
+        # Aggregation
+        ttk.Label(thresh_frame, text="Aggregation:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.agg_var = tk.StringVar(value=self.settings.get('aggregation', 'max'))
+        agg_combo = ttk.Combobox(thresh_frame, textvariable=self.agg_var,
+                                values=['max', 'mean', 'sum'],
+                                state='readonly', width=23)
+        agg_combo.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=2)
+        
         # Margin slider
-        ttk.Label(thresh_frame, text="Margin:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(thresh_frame, text="Margin:").grid(row=2, column=0, sticky=tk.W)
         self.margin_var = tk.DoubleVar(value=self.settings.get('margin', 0.008))
         self.margin_label = ttk.Label(thresh_frame, text=f"{self.margin_var.get():.3f}")
-        self.margin_label.grid(row=0, column=2, padx=5)
+        self.margin_label.grid(row=2, column=2, padx=5)
         margin_scale = ttk.Scale(thresh_frame, from_=0.0, to=0.03, 
                                 variable=self.margin_var, orient=tk.HORIZONTAL,
                                 command=lambda v: self.margin_label.config(text=f"{float(v):.3f}"))
-        margin_scale.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=2)
+        margin_scale.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=2)
         
         # Ratio slider
-        ttk.Label(thresh_frame, text="Ratio:").grid(row=1, column=0, sticky=tk.W)
+        ttk.Label(thresh_frame, text="Ratio:").grid(row=3, column=0, sticky=tk.W)
         self.ratio_var = tk.DoubleVar(value=self.settings.get('ratio', 1.06))
         self.ratio_label = ttk.Label(thresh_frame, text=f"{self.ratio_var.get():.2f}")
-        self.ratio_label.grid(row=1, column=2, padx=5)
+        self.ratio_label.grid(row=3, column=2, padx=5)
         ratio_scale = ttk.Scale(thresh_frame, from_=1.0, to=1.3,
                                variable=self.ratio_var, orient=tk.HORIZONTAL,
                                command=lambda v: self.ratio_label.config(text=f"{float(v):.2f}"))
-        ratio_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=2)
+        ratio_scale.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=2)
         
         # Threshold slider
-        ttk.Label(thresh_frame, text="Threshold:").grid(row=2, column=0, sticky=tk.W)
+        ttk.Label(thresh_frame, text="Threshold:").grid(row=4, column=0, sticky=tk.W)
         self.threshold_var = tk.DoubleVar(value=self.settings.get('threshold', 0.10))
         self.threshold_label = ttk.Label(thresh_frame, text=f"{self.threshold_var.get():.2f}")
-        self.threshold_label.grid(row=2, column=2, padx=5)
+        self.threshold_label.grid(row=4, column=2, padx=5)
         threshold_scale = ttk.Scale(thresh_frame, from_=0.05, to=0.4,
                                   variable=self.threshold_var, orient=tk.HORIZONTAL,
                                   command=lambda v: self.threshold_label.config(text=f"{float(v):.2f}"))
-        threshold_scale.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=2)
+        threshold_scale.grid(row=4, column=1, sticky=(tk.W, tk.E), pady=2)
         
         thresh_frame.columnconfigure(1, weight=1)
         
@@ -348,12 +390,92 @@ class PhotoOrganizerApp:
         self.status_bar = ttk.Label(self.root, text="Ready", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.grid(row=1, column=0, sticky=(tk.W, tk.E))
     
-    def toggle_custom_labels(self):
-        """Toggle custom labels file input."""
-        if self.use_custom_labels.get():
+    def on_label_source_change(self):
+        """Handle label source radio button change."""
+        if self.label_source_var.get() == 'custom':
             self.labels_entry.config(state='normal')
         else:
             self.labels_entry.config(state='disabled')
+        self.update_label_info()
+        self.estimate_processing_time()
+    
+    def on_model_change(self, event=None):
+        """Handle model selection change."""
+        self.update_model_info()
+        self.estimate_processing_time()
+    
+    def update_model_info(self):
+        """Update model information display."""
+        try:
+            model_size = self.model_size_var.get()
+            model_info = self.model_manager.get_model_info(model_size)
+            
+            # Check if model is cached
+            is_cached = self.model_manager.is_cached(model_size)
+            cache_status = "✓ Cached" if is_cached else f"⬇ Download required (~{model_info['size_mb']}MB)"
+            
+            info_text = f"Accuracy: {model_info['accuracy']} | Speed: {model_info['speed']} | {cache_status}"
+            self.model_info_label.config(text=info_text)
+        except Exception as e:
+            self.model_info_label.config(text=f"Error: {str(e)}")
+    
+    def update_label_info(self):
+        """Update label information display."""
+        try:
+            label_source = self.label_source_var.get()
+            
+            if label_source == 'custom':
+                # Try to count labels in custom file
+                try:
+                    labels_path = Path(self.labels_var.get())
+                    if labels_path.exists():
+                        import json
+                        with open(labels_path, 'r') as f:
+                            custom_labels = json.load(f)
+                        count = len(custom_labels)
+                        info_text = f"Custom labels: {count} categories from {labels_path.name}"
+                    else:
+                        info_text = f"Custom file: {labels_path.name} (file not found)"
+                except Exception:
+                    info_text = "Custom labels: file error"
+            else:
+                # Built-in label tiers
+                label_stats = get_label_stats()
+                if label_source in label_stats:
+                    stats = label_stats[label_source]
+                    info_text = f"{label_source.title()}: {stats['count']} categories | Est. accuracy: {stats['accuracy']}"
+                else:
+                    info_text = "Label info unavailable"
+            
+            self.label_info_label.config(text=info_text)
+        except Exception as e:
+            self.label_info_label.config(text=f"Error: {str(e)}")
+    
+    def estimate_processing_time(self):
+        """Estimate and display processing time."""
+        try:
+            # Count images in source folder
+            src_path = Path(self.source_var.get())
+            if not src_path.exists():
+                return
+            
+            image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.gif'}
+            image_files = [f for f in src_path.rglob("*") if f.suffix.lower() in image_extensions]
+            num_images = len(image_files)
+            
+            if num_images == 0:
+                return
+            
+            # Estimate time
+            model_size = self.model_size_var.get()
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            estimated_time = self.model_manager.estimate_processing_time(num_images, model_size, use_gpu=(device == "cuda"))
+            
+            # Update status bar with estimate
+            time_str = f"{estimated_time:.0f}s" if estimated_time < 60 else f"{estimated_time/60:.1f}m"
+            self.status_bar.config(text=f"Found {num_images} images | Estimated time: {time_str}")
+        except Exception:
+            pass  # Silently fail if estimation not possible
     
     def browse_source(self):
         """Open dialog to select source folder."""
@@ -362,6 +484,7 @@ class PhotoOrganizerApp:
         if folder:
             self.source_var.set(folder)
             self.save_settings()
+            self.estimate_processing_time()
     
     def browse_destination(self):
         """Open dialog to select destination folder."""
@@ -387,8 +510,9 @@ class PhotoOrganizerApp:
         return {
             'source': str(Path.cwd()),
             'destination': str(Path.cwd() / 'sorted'),
-            'use_custom_labels': False,
+            'label_source': 'small',
             'labels_file': 'labels.json',
+            'model_size': 'small',
             'decision': 'margin',
             'aggregation': 'max',
             'margin': 0.008,
@@ -407,8 +531,9 @@ class PhotoOrganizerApp:
         settings = {
             'source': self.source_var.get(),
             'destination': self.dest_var.get(),
-            'use_custom_labels': self.use_custom_labels.get(),
+            'label_source': self.label_source_var.get(),
             'labels_file': self.labels_var.get(),
+            'model_size': self.model_size_var.get(),
             'decision': self.decision_var.get(),
             'aggregation': self.agg_var.get(),
             'margin': self.margin_var.get(),
@@ -436,7 +561,7 @@ class PhotoOrganizerApp:
     def load_settings_to_ui(self):
         """Load saved settings into UI controls."""
         # Settings are already loaded via StringVar/BooleanVar/etc initialization
-        self.toggle_custom_labels()  # Ensure labels entry state is correct
+        self.on_label_source_change()  # Ensure labels entry state is correct
     
     def load_settings_file(self):
         """Load settings from a selected file."""
@@ -476,8 +601,9 @@ class PhotoOrganizerApp:
         """Apply loaded settings to UI."""
         self.source_var.set(settings.get('source', ''))
         self.dest_var.set(settings.get('destination', ''))
-        self.use_custom_labels.set(settings.get('use_custom_labels', False))
+        self.label_source_var.set(settings.get('label_source', 'small'))
         self.labels_var.set(settings.get('labels_file', 'labels.json'))
+        self.model_size_var.set(settings.get('model_size', 'small'))
         self.decision_var.set(settings.get('decision', 'margin'))
         self.agg_var.set(settings.get('aggregation', 'max'))
         self.margin_var.set(settings.get('margin', 0.008))
@@ -491,7 +617,8 @@ class PhotoOrganizerApp:
         self.topk_var.set(settings.get('topk', 1))
         
         # Update UI state
-        self.toggle_custom_labels()
+        self.on_label_source_change()
+        self.update_model_info()
         self.settings = settings
     
     def build_command(self, dry_run=False):
@@ -501,6 +628,7 @@ class PhotoOrganizerApp:
         args = [
                "--src", self.source_var.get(),
                "--dst", self.dest_var.get(),
+               "--model-size", self.model_size_var.get(),
                "--agg", self.agg_var.get(),
                "--decision", self.decision_var.get(),
                "--margin", str(self.margin_var.get()),
@@ -508,8 +636,12 @@ class PhotoOrganizerApp:
                "--threshold", str(self.threshold_var.get()),
                "--topk", str(self.topk_var.get())]
         
-        if self.use_custom_labels.get() and self.labels_var.get():
+        # Handle label source selection
+        label_source = self.label_source_var.get()
+        if label_source == 'custom' and self.labels_var.get():
             args.extend(["--labels", self.labels_var.get()])
+        elif label_source in ['small', 'medium', 'large']:
+            args.extend(["--label-tier", label_source])
         
         if self.copy_mode.get():
             args.append("--copy")
@@ -539,9 +671,12 @@ class PhotoOrganizerApp:
         if not self.validate_inputs():
             return
         
+        # Check for download approval if needed
+        if not self.check_download_approval():
+            return
+        
         self.clear_preview()
         self.log_message("Running preview...", 'info')
-        # Don't switch tabs immediately - let the preview images appear
         
         # Build and run command
         cmd = self.build_command(dry_run=True)
@@ -550,6 +685,10 @@ class PhotoOrganizerApp:
     def run_sort(self):
         """Run the actual photo sorting."""
         if not self.validate_inputs():
+            return
+        
+        # Check for download approval if needed
+        if not self.check_download_approval():
             return
         
         # Confirm with user
@@ -564,7 +703,6 @@ class PhotoOrganizerApp:
         
         self.clear_preview()
         self.log_message(f"Starting photo sort ({mode} mode)...", 'info')
-        self.notebook.select(self.output_tab)
         
         # Build and run command
         cmd = self.build_command(dry_run=False)
@@ -723,6 +861,9 @@ class PhotoOrganizerApp:
                     self.run_btn.config(state='normal')
                     self.stop_btn.config(state='disabled')
                     
+                    # Refresh model info in case model was downloaded during processing
+                    self.update_model_info()
+                    
                     if msg_data == 'success':
                         self.progress_var.set(100)
                         self.progress_label.config(text="Complete!")
@@ -761,13 +902,40 @@ class PhotoOrganizerApp:
             messagebox.showerror("Error", f"Source folder does not exist:\n{src_path}")
             return False
             
-        if self.use_custom_labels.get():
+        if self.label_source_var.get() == 'custom':
             labels_path = Path(self.labels_var.get())
             if not labels_path.exists():
                 messagebox.showerror("Error", f"Labels file not found:\n{labels_path}")
                 return False
                 
         return True
+    
+    def check_download_approval(self):
+        """Check if model needs download and get user approval."""
+        model_size = self.model_size_var.get()
+        
+        # Check if model is already cached
+        if self.model_manager.is_cached(model_size):
+            return True  # No download needed
+        
+        # Get model info for download dialog
+        model_info = self.model_manager.get_model_info(model_size)
+        size_mb = model_info['size_mb']
+        
+        # Show download approval dialog
+        result = messagebox.askyesno(
+            "Download Required",
+            f"The {model_size.upper()} model needs to be downloaded first.\n\n"
+            f"Download size: ~{size_mb}MB\n"
+            f"This will happen once and be cached for future use.\n\n"
+            f"Download now?",
+            icon='question'
+        )
+        
+        if not result:
+            self.log_message("Operation cancelled - model download declined", 'warning')
+            
+        return result
     
     def clear_preview(self):
         """Clear the preview panel."""
@@ -779,10 +947,6 @@ class PhotoOrganizerApp:
     def add_preview_image(self, source_path, dest_path, action_text):
         """Add an image to the preview panel."""
         try:
-            # Switch to preview tab if not already there
-            if self.notebook.index("current") != 0:
-                self.notebook.select(self.preview_tab)
-            
             # Create a frame for this image preview
             preview_frame = ttk.Frame(self.preview_content, relief=tk.RIDGE, borderwidth=1)
             preview_frame.pack(fill=tk.X, padx=5, pady=5)
