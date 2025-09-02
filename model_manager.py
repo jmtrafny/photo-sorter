@@ -9,15 +9,12 @@ This module provides efficient model management with:
 """
 
 import os
-import json
-import hashlib
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Callable
 import warnings
 
 import torch
 import open_clip
-from tqdm import tqdm
 
 # Silence the benign open_clip warning
 warnings.filterwarnings(
@@ -431,8 +428,7 @@ class ModelManager:
             models_to_check = list(MODEL_CONFIGS.keys())
         
         for size in models_to_check:
-            debug_info.append(f"\
---- {size.upper()} MODEL ---")
+            debug_info.append(f"--- {size.upper()} MODEL ---")
             cache_path = self.get_cache_path(size)
             debug_info.append(f"Model cache path: {cache_path}")
             debug_info.append(f"Path exists: {cache_path.exists()}")
@@ -448,8 +444,7 @@ class ModelManager:
             debug_info.append(f"Is cached: {self.is_cached(size)}")
         
         # Check system cache locations
-        debug_info.append("\
---- SYSTEM CACHE LOCATIONS ---")
+        debug_info.append("--- SYSTEM CACHE LOCATIONS ---")
         system_caches = [
             Path.home() / ".cache" / "clip",
             Path.home() / ".cache" / "open_clip", 
@@ -463,8 +458,7 @@ class ModelManager:
                 if files:
                     debug_info.append(f"  Model files found: {len(files)}")
         
-        return "\
-".join(debug_info)
+        return "\n".join(debug_info)
 
 
 # Singleton instance for convenient access

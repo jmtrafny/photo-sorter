@@ -4,7 +4,6 @@ Debug script to check model caching status and paths.
 Use this to troubleshoot caching issues.
 """
 
-import sys
 from model_manager import get_model_manager
 
 def main():
@@ -21,7 +20,7 @@ def main():
     
     for model_size in ["small", "medium", "large"]:
         is_cached = model_manager.is_cached(model_size)
-        print(f"{model_size.upper()} model cached: {'✅ YES' if is_cached else '❌ NO'}")
+        print(f"{model_size.upper()} model cached: {'YES' if is_cached else 'NO'}")
     
     print("\n=== CACHE PATHS ===")
     for model_size in ["small", "medium", "large"]:

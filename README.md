@@ -1,12 +1,15 @@
-# Photo Organizer — Weekend MVP
+# Photo Organizer — AI-Powered Photo Sorting
 
-Local, free-ish (no paid APIs) photo organizer that:
+Local, privacy-focused photo organizer that:
 
-* Generates **content tags** with OpenCLIP (ViT‑B/32) zero‑shot prompts from built-in labels.
-* Sorts into **category folders** and **Year/Month** subfolders from EXIF.
-* Optional **duplicate detection** (perceptual hash).
-* **Preview** to see moves before execution.
-* **Tkinter GUI** for easy drag-and-drop operation.
+* Generates **content tags** with OpenCLIP models (4 sizes: small/medium/large/xlarge) using zero‑shot classification
+* **Smart caching** — models download once and cache locally for future use
+* **Tiered label sets** — Small (8), Medium (16), Large (40+) categories for different accuracy needs  
+* Sorts into **category folders** and **Year/Month** subfolders from EXIF
+* **Batch processing** with parallel image loading for better performance
+* Optional **duplicate detection** (perceptual hash)
+* **Preview mode** to see moves before execution
+* **Intuitive Tkinter GUI** with model selection and processing time estimates
 
 > Runs on CPU or GPU (CUDA if available). Supported image types: `.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`, `.tiff`, `.gif`. HEIC can be added later.
 
@@ -68,6 +71,7 @@ The command-line interface provides more granular control:
 python photo_sorter.py `
   --src "path\to\Unsorted" `
   --dst "path\to\Sorted" `
+  --model-size medium --label-tier medium `
   --agg max --decision margin --margin 0.008 `
   --ignore-weights --rich-prompts `
   --dry-run --debug-scores --debug-topk 5
@@ -79,6 +83,7 @@ python photo_sorter.py `
 python photo_sorter.py `
   --src "path\to\Unsorted" `
   --dst "path\to\Sorted" `
+  --model-size medium --label-tier medium `
   --agg max --decision margin --margin 0.008 `
   --ignore-weights --rich-prompts `
   --dedupe --topk 1 --copy
@@ -95,7 +100,7 @@ Scores are **normalized across labels**, so the top score typically sits around 
 **Recommended defaults:**
 
 ``` powershell
---agg max --decision margin --margin 0.008 --ignore-weights --rich-prompts
+--model-size medium --label-tier medium --agg max --decision margin --margin 0.008 --ignore-weights --rich-prompts
 ```
 
 Adjust confidence:
@@ -113,9 +118,11 @@ Adjust confidence:
 * `--src <path>`: Folder containing unsorted images.
 * `--dst <path>`: Destination root for sorted images.
 
-### Labels & prompts
+### Model & labels
 
-* `--labels <path>` *(default: <b>**************************************************`labels.json`**************************************************</b>)*: Label config with `prompt`, `synonyms`, `weight`.
+* `--model-size {small,medium,large,xlarge}` *(default: `small`)*: AI model size - small (fast), medium (balanced), large (accurate), xlarge (max accuracy).
+* `--label-tier {small,medium,large}` *(auto-detect if not specified)*: Label complexity - small (8 labels), medium (16 labels), large (40+ labels). Auto-selects based on model size if not specified.
+* `--labels <path>` *(optional)*: Custom label config JSON file. Uses built-in tiered labels if not provided.
 * `--rich-prompts` *(bool)*: Use multiple prompt templates per synonym for better separation (slightly slower).
 * `--ignore-weights` *(bool)*: Treat all label weights as 1.0 to avoid category bias.
 
@@ -150,11 +157,16 @@ Adjust confidence:
 
 * `--dedupe` *(bool)*: Perceptual duplicate detection via average‑hash. Duplicates are placed in `dst/_duplicates/`.
 
+### Performance
+
+* `--batch-size <int>` *(auto-detect if not specified)*: Batch size for processing images. Auto-detects optimal size based on model and available memory.
+* `--parallel-load <int>` *(default: number of CPU cores)*: Number of parallel workers for image loading to improve performance.
+
 ### Debugging & safety
 
 * `--dry-run` *(bool)*: Show planned actions without changing files.
 * `--debug-scores` *(bool)*: Print top label scores per image.
-* `--debug-topk <int>` *(default: <b>**************************************************`5`**************************************************</b>)*: How many labels to print with `--debug-scores`.
+* `--debug-topk <int>` *(default: `5`)*: How many labels to print with `--debug-scores`.
 * `--debug-prompts` *(bool)*: Print top matching prompt/synonym hits (slower; use on small test sets).
 * `--skip-existing` *(bool)*: Skip files if destination already exists (useful for incremental runs).
 * `--no-overwrite` *(bool)*: Error and stop if destination exists instead of auto-renaming (safety guard).
@@ -175,6 +187,36 @@ Adjust confidence:
 
 * When using date folders, EXIF `DateTimeOriginal` is preferred; falls back to file modified time.
 * Low‑confidence images (or when policy rejects the top label) go to `<dst>/_unsorted/` (or `<dst>/_unsorted/<YYYY>/<MM>/` with date folders).
+
+- - -
+
+## Model Selection & Performance
+
+### Choosing Model Size
+
+The application supports 4 different model sizes with different accuracy/speed tradeoffs:
+
+* **Small** (ViT-B-32): ~60% accuracy, fastest processing, ~150MB download
+* **Medium** (ViT-B-16): ~75% accuracy, moderate speed, ~300MB download  
+* **Large** (ViT-L-14): ~85% accuracy, slower processing, ~900MB download
+* **XLarge** (ViT-L-14-336): ~90% accuracy, slowest but most accurate, ~900MB download
+
+### Smart Caching
+
+* Models are **automatically cached** after first download to your system's app data folder
+* **No repeated downloads** - subsequent runs load instantly from cache
+* Works without admin privileges or developer mode (uses degraded symlink mode on Windows)
+* Cache location: `%APPDATA%\photo_organizer` on Windows, `~/.cache/photo_organizer` on Linux/Mac
+
+### Label Tiers
+
+Choose label complexity based on your needs:
+
+* **Small (8 labels)**: people, pets, landscape, food, documents, cars, buildings, events
+* **Medium (16 labels)**: Adds wildlife, cityscape, screenshots, flowers, kids, sports, art, indoor, selfies  
+* **Large (40+ labels)**: Comprehensive set including portraits, family, mountains, beach, architecture, dessert, wedding, etc.
+
+If not specified, label tier auto-selects based on model size.
 
 - - -
 
