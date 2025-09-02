@@ -77,31 +77,30 @@ def main():
         print("[OK] Copied: labels.json -> example-labels.json")
     
     # Step 6: Create usage guide
-    usage_content = """Photo Organizer - AI-Powered Photo Organization
+    usage_content = """Photo Organizer
 
 GETTING STARTED:
 1. Double-click PhotoOrganizer.exe
-2. Browser opens automatically with user-friendly interface  
-3. First run downloads AI model (~150MB) - requires internet
+2. Native desktop app launches with intuitive interface
+3. Choose your AI model size (Small/Medium/Large/XLarge)
+4. First run downloads selected model (150MB-900MB) - requires internet
+5. Subsequent runs load from cache
 
 SYSTEM REQUIREMENTS:
-- Windows 10 or later
-- 4GB+ RAM (8GB recommended)
-- 2GB free disk space
+- Windows 10 or later  
+- Small model: 4GB RAM, Medium: 8GB RAM, Large/XLarge: 16GB RAM
+- 2-4GB free disk space (+ model cache)
 - Internet connection (first run only)
 
 HOW TO USE:
-1. Click folder icons to select source photos and destination
-2. Preview a sample to see how photos will be organized
-3. Click "Run FULL (COPY)" to safely organize photos
-4. App closes automatically when you close the browser
+1. Select source photos and destination folders
+2. Choose model size: Small (fast) → XLarge (most accurate)
+3. Pick label complexity: 8, 16, or 40+ categories  
+4. Preview to see where photos will be sorted
+5. Copy or Move the photos to organized folders by clicking "Run Full Sort"
 
-CUSTOM CATEGORIES:
-- Advanced users can edit example-labels.json
-- Restart app to use custom categories
-
-That's it! No technical knowledge needed.
-For developers: see README.md for source code details.
+For technical details see: 
+https://github.com/jmtrafny/photo-sorter/blob/main/DEVREADME.md
 """
     
     with open(release_dir / "USAGE.txt", "w", encoding="utf-8") as f:
